@@ -1,40 +1,11 @@
 # Review retained Herdr work
 
-## Review result
-
-Useful task-05 safety fixes have been adapted inside
-`src/multiplexer/herdr/`. No core workflow, command, configuration, state, or
-sandbox changes were imported.
-
-Integrated:
-
-- Immediate cleanup closes captured, verified terminals with `pane.close`,
-  not whole tabs or workspaces. Late foreign occupants remain alive and cause
-  a partial-cleanup error.
-- The same rule now applies to the current adapter's deferred Python helper.
-- Launch ownership comes from the live destination terminal after a native
-  move, not an old tab record.
-- A replacement launch retains primary ownership. An added split is not primary.
-- Adapter-local tests reuse the task-05 close-barrier test approach. Six
-  private-server cases cover immediate/deferred cleanup and late insertion
-  into existing/new tabs. Another probe checks moved-terminal launch ownership.
-
-Verification: `cargo test` and
-`python3 src/multiplexer/herdr/integration/run.py` pass. See
-`src/multiplexer/herdr/SUPPORT.md` for supported functions and restrictions.
-
 ## task-05 — retain remaining reference work
 
 Worktree:
 `/private/var/folders/8x/70__y82n71dbb9q971h35d0h0000gn/T/.ctx-mode-I3pasx/workmux-herdr-lanes-_vf9c4mp/task-05`
 
 Detached HEAD: `5055fe0230c995cd31c8a54d3a449e894af545c0`, with uncommitted changes.
-
-The safety fixes above are integrated. The old cleanup, launch, and workflow
-tests depend on shared interfaces and fixtures absent from the current adapter;
-relevant checks were adapted rather than copied wholesale. Session ownership,
-core workflow changes, and the old deferred-operation runtime were not imported.
-Keep this worktree for those remaining references.
 
 ## task-06 — retain sidebar recovery reference
 
