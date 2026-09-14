@@ -1,6 +1,13 @@
 # Full workmux support on herdr
 
-Status: architecture approved; implementation not started.
+Status: full-feature architecture approved; an adapter-only subset is implemented.
+Full feature support is not verified.
+
+For the current implementation and restrictions, see the
+[Herdr adapter support record](../../src/multiplexer/herdr/SUPPORT.md).
+The adapter includes verified-terminal cleanup and live-terminal launch
+ownership. Session-mode workflows, sidebar integration, and the other shared
+changes described below remain outside the current implementation.
 
 This design adds herdr support without copying workmux workflows or reducing their feature set. It extends the existing backend interface and separates the remaining direct tmux operations from shared code.
 

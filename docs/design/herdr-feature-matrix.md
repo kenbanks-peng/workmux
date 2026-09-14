@@ -4,7 +4,26 @@ This is the planning matrix for [full herdr support](herdr-support.md). It is no
 
 Baseline: workmux commit `ae85d52e9686ac9324bdad2000355e06d8dbfe20`; unmodified herdr 0.9.0, protocol 22.
 
-**All workmux-on-herdr acceptance cases are pending.** The isolated layout and command-launch results establish only selected herdr primitives. They do not mark any complete feature below as passed.
+**Full-feature acceptance remains pending.** The current adapter has a verified
+subset. See the [adapter support record](../../src/multiplexer/herdr/SUPPORT.md)
+for its restrictions. The results below do not mark a complete feature row as
+passed.
+
+## Integrated adapter evidence
+
+Run `python3 src/multiplexer/herdr/integration/run.py` against Herdr 0.9.0,
+protocol 22. The runner uses private servers, not the user's session.
+
+| Area | Verified subset | Evidence under `src/multiplexer/herdr/` |
+| --- | --- | --- |
+| C01, C03–C05, C10 | CLI add/list/close/open/remove with an explicit parent workspace; session mode is still rejected | `integration/run.py::cli_smoke` |
+| C04, C05 | Immediate and deferred cleanup preserve foreign terminals inserted just before a close request; a retained container produces an error | `cleanup_tests.rs::isolated_cleanup_race`, `integration/cleanup_proxy.py`; six cases |
+| W02, W06 | Launch uses the live terminal owner after a native move, retains primary ownership on replacement, and does not copy the primary flag to a split | `cleanup_tests.rs::isolated_launch_ownership` |
+| C04, C05 | Deferred cleanup rejects changed contents and stale server identity; scheduled cleanup survives caller exit | `deferred_tests.rs::isolated_deferred_cleanup` |
+| W02, W05, W06 | Core pane operations, launch, identity checks, and native split-size limits | `tests.rs` private-server probes |
+
+Task-06 sidebar layout, recovery, locking, and spacing-calibration work remains
+reference code in the retained worktree. C21, C28, and U07–U10 are not integrated.
 
 ## Coverage rules
 

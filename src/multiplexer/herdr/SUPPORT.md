@@ -26,7 +26,16 @@ The adapter supplies tab creation and placement, pane splits, controlled command
 launch, input, capture, focus, zoom, names, ownership checks, native agent reports,
 and immediate or deferred cleanup. Splits outside Herdr's native 10–90% range
 fail before pane allocation. Only fresh workmux panes can be replaced for launch.
-Live layout replacement is not used.
+Live layout replacement is not used. Launches read ownership from the live
+destination terminal, not a cached tab record. A replacement retains the primary
+ownership flag; an added split does not inherit that flag.
+
+Immediate and deferred cleanup close only captured, verified terminals with
+`pane.close`. They never close a whole tab or workspace. A foreign pane inserted
+after the ownership check remains alive. If the target container remains,
+cleanup reports a partial-cleanup error. Already closed owned panes are not
+restored. A foreign pane present at the initial check blocks cleanup before any
+pane is closed.
 
 Deferred operations require `python3` on PATH. The embedded standard-library
 helper checks the server lifetime on each connection and checks terminal
@@ -60,3 +69,16 @@ paths, then stops those servers. It requires Herdr 0.9.0 and Python 3. Live Rust
 probes are explicitly ignored in ordinary unit runs; they are not counted as
 passed without a private server. The earlier full-feature matrix is not an
 acceptance claim for this adapter.
+
+The runner also tests six cleanup races: immediate and deferred tab cleanup,
+and immediate and deferred workspace cleanup with insertion into an existing
+or new tab. A protocol proxy inserts a foreign terminal just before the first
+close request. Each case checks that only `pane.close` was sent, the owned
+terminal closed, the foreign shell survived with working input/output, and
+cleanup reported the retained container. A separate probe checks launch
+ownership after a native move into a tab with stale ownership metadata.
+
+The retained task-06 layout trees, journals, locks, spacing calibration, and
+sidebar recovery tests remain reference work. They are not integrated or
+verified against this adapter. Full sidebar support still requires shared
+interface and command changes.

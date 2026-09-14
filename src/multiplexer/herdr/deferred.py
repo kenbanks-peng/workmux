@@ -126,10 +126,29 @@ def run(payload):
             {p["terminal_id"] for p in live} == set(expected),
             "Herdr target contents changed",
         )
-        params = {f"{kind}_id": target}
-        if kind == "workspace":
-            params["close_group"] = False
-        client.request(f"{kind}.close", **params)
+        # Never close a container: foreign panes can arrive after the check.
+        # Resolve each captured terminal again because native moves change IDs.
+        for terminal, shell in expected.items():
+            pane = next(
+                (p for p in client.snapshot()["panes"] if p["terminal_id"] == terminal),
+                None,
+            )
+            if pane is None:
+                continue
+            process = client.request("pane.process_info", pane_id=pane["pane_id"])[
+                "process_info"
+            ]
+            require(
+                process["shell_pid"] == shell["pid"]
+                and process_start(shell["pid"]) == shell["start"],
+                "Herdr terminal process changed",
+            )
+            client.request("pane.close", pane_id=pane["pane_id"])
+        remaining = client.snapshot()
+        require(
+            not any(item[f"{kind}_id"] == target for item in remaining[f"{kind}s"]),
+            "Herdr cleanup preserved unexpected occupants; target container remains",
+        )
     else:
         require(action in ("focus-tab", "focus-workspace"), "Invalid deferred action")
         client.request(f"{kind}.focus", **{f"{kind}_id": target})

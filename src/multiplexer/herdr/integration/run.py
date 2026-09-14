@@ -7,6 +7,7 @@ import subprocess
 from contextlib import ExitStack
 from pathlib import Path
 
+from cleanup_proxy import CleanupProxy
 from server import HerdrServer, wait_until
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -46,7 +47,11 @@ def env_for(server):
 
 
 def probe(binary, server, name, variables):
-    module = "deferred_tests" if name == "isolated_deferred_cleanup" else "tests"
+    module = "tests"
+    if name == "isolated_deferred_cleanup":
+        module = "deferred_tests"
+    elif name in {"isolated_cleanup_race", "isolated_launch_ownership"}:
+        module = "cleanup_tests"
     result = subprocess.run(
         [
             str(binary),
@@ -213,6 +218,31 @@ def main():
             client = server.attach()
             wait_until(lambda client=client: client.output)
             probe(binary, server, name, {variable: str(server.socket_path)})
+    with ExitStack() as stack:
+        probe(binary, own(stack), "isolated_launch_ownership", {})
+    for mode in [
+        "immediate-tab",
+        "immediate-workspace",
+        "deferred-tab",
+        "deferred-workspace",
+    ]:
+        for insertion in (
+            ["same-tab", "new-tab"] if mode.endswith("workspace") else ["same-tab"]
+        ):
+            with ExitStack() as stack:
+                server = own(stack)
+                with CleanupProxy(server, insertion) as proxy:
+                    probe(
+                        binary,
+                        proxy,
+                        "isolated_cleanup_race",
+                        {"WORKMUX_HERDR_CLEANUP_MODE": mode},
+                    )
+                    proxy.verify()
+                    print(
+                        f"PASS {mode} cleanup preserves {insertion} insertion",
+                        flush=True,
+                    )
     with ExitStack() as stack:
         caller_probe(binary, own(stack))
     with ExitStack() as stack:

@@ -1,39 +1,69 @@
 # Review retained Herdr work
 
-Keep these worktrees until the useful changes have been reviewed. Both use
-detached HEAD at `5055fe0230c995cd31c8a54d3a449e894af545c0` and contain
-uncommitted changes. Their tests have not been rerun against the current adapter.
+## Review result
 
-## task-05 — adapter safety fixes
+Useful task-05 safety fixes have been adapted inside
+`src/multiplexer/herdr/`. No core workflow, command, configuration, state, or
+sandbox changes were imported.
+
+Integrated:
+
+- Immediate cleanup closes captured, verified terminals with `pane.close`,
+  not whole tabs or workspaces. Late foreign occupants remain alive and cause
+  a partial-cleanup error.
+- The same rule now applies to the current adapter's deferred Python helper.
+- Launch ownership comes from the live destination terminal after a native
+  move, not an old tab record.
+- A replacement launch retains primary ownership. An added split is not primary.
+- Adapter-local tests reuse the task-05 close-barrier test approach. Six
+  private-server cases cover immediate/deferred cleanup and late insertion
+  into existing/new tabs. Another probe checks moved-terminal launch ownership.
+
+Verification: `cargo test` and
+`python3 src/multiplexer/herdr/integration/run.py` pass. See
+`src/multiplexer/herdr/SUPPORT.md` for supported functions and restrictions.
+
+## task-05 — retain remaining reference work
 
 Worktree:
 `/private/var/folders/8x/70__y82n71dbb9q971h35d0h0000gn/T/.ctx-mode-I3pasx/workmux-herdr-lanes-_vf9c4mp/task-05`
 
-Review `src/multiplexer/herdr/mod.rs` and `tests/test_herdr_cleanup_races.py` for:
+Detached HEAD: `5055fe0230c995cd31c8a54d3a449e894af545c0`, with uncommitted changes.
 
-- Close only verified panes, not the whole tab. Preserve foreign panes inserted
-  after the ownership check. The current adapter still has this race.
-- Read ownership from the live destination pane after a move, not an old tab record.
-- Preserve the primary ownership flag when replacing a launch pane.
-- Reuse relevant cleanup, launch, and workflow tests.
+The safety fixes above are integrated. The old cleanup, launch, and workflow
+tests depend on shared interfaces and fixtures absent from the current adapter;
+relevant checks were adapted rather than copied wholesale. Session ownership,
+core workflow changes, and the old deferred-operation runtime were not imported.
+Keep this worktree for those remaining references.
 
-Adapt these fixes inside `src/multiplexer/herdr/`. Do not merge the worktree's
-core workflow, command, or configuration changes.
-
-## task-06 — layout recovery and tests
+## task-06 — retain sidebar recovery reference
 
 Worktree:
 `/private/var/folders/8x/70__y82n71dbb9q971h35d0h0000gn/T/.ctx-mode-I3pasx/workmux-herdr-lanes-_vf9c4mp/task-06`
 
-Potentially useful files under `src/multiplexer/herdr/`:
+Detached HEAD: `5055fe0230c995cd31c8a54d3a449e894af545c0`, with uncommitted changes.
 
-- `layout.rs`: layout trees, operation journals, and exclusive locks.
-- `sidebar_layout.rs`: live-pane moves and recovery after interrupted operations.
-- `calibration.rs`: measure native pane spacing for fixed-size layouts.
-- `sidebar.rs`: backend-local settings and sidebar operations.
+Reviewed reference areas under `src/multiplexer/herdr/`:
 
-Review `tests/test_herdr_sidebar_layout.py`, `tests/test_herdr_sidebar_review.py`,
-and `tests/support/herdr_response_proxy.py` for failure and recovery tests.
+- `layout.rs`: identity-based trees, operation journals, and exclusive locks.
+- `sidebar_layout.rs`: live-pane moves, before/after topology checks, and
+  recovery without blind replay after a lost response.
+- `calibration.rs`: native spacing probes and ownership-qualified probe cleanup.
+- `sidebar.rs`: backend-local settings, scope, and sidebar operations.
 
-Full sidebar integration requires core changes and is outside the current
-scope. Retain this code as reference; do not merge it wholesale.
+The layout and calibration modules depend on each other and on sidebar
+ownership roles and methods absent from the current adapter. Adding them alone
+would add unused code, not working layout recovery. Full sidebar integration
+requires core changes and remains outside this scope. Nothing was imported.
+
+Retain `tests/test_herdr_sidebar_layout.py`,
+`tests/test_herdr_sidebar_review.py`, and
+`tests/support/herdr_response_proxy.py` as failure/recovery test references.
+These sidebar tests have not been rerun against the current adapter. Do not
+claim sidebar support from these files.
+
+## Other retained worktrees
+
+`task-09-fixes` contains state and sandbox RPC changes plus identity tests.
+These are outside the adapter-only boundary and were not imported.
+`task-09-review` has no local changes. Both worktrees remain untouched.
