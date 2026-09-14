@@ -7,6 +7,7 @@ pub mod agent;
 pub mod conversation;
 pub mod handle;
 pub mod handshake;
+pub mod herdr;
 pub mod kitty;
 pub mod tmux;
 pub mod types;
@@ -23,6 +24,7 @@ use std::time::Duration;
 
 pub use handle::MuxHandle;
 pub use handshake::PaneHandshake;
+pub use herdr::HerdrBackend;
 pub use tmux::TmuxBackend;
 pub use types::*;
 
@@ -31,6 +33,21 @@ use crate::config::{Config, PaneConfig, SplitDirection, WindowPlacement};
 pub const STATUS_TARGET_BACKEND_ENV: &str = "WORKMUX_STATUS_BACKEND";
 pub const STATUS_TARGET_INSTANCE_ENV: &str = "WORKMUX_STATUS_INSTANCE";
 pub const STATUS_TARGET_PANE_ENV: &str = "WORKMUX_STATUS_PANE_ID";
+
+/// Cancel a backend's undelivered command if shared preparation fails.
+struct PaneLaunchGuard<'a, M: Multiplexer + ?Sized> {
+    backend: &'a M,
+    pane: &'a str,
+    armed: bool,
+}
+
+impl<M: Multiplexer + ?Sized> Drop for PaneLaunchGuard<'_, M> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.backend.cancel_pane_launch(self.pane);
+        }
+    }
+}
 
 fn command_with_status_target(
     command: &str,
@@ -593,6 +610,16 @@ pub trait Multiplexer: Send + Sync {
         util::unix_pipe_handshake()
     }
 
+    /// Cancel an undelivered controlled command, if the backend uses one.
+    fn cancel_pane_launch(&self, _pane_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    /// Release backend launch resources once pane setup is complete.
+    fn finish_pane_setup(&self, _pane_ids: &[String]) -> Result<()> {
+        Ok(())
+    }
+
     // === Status ===
 
     /// Set status icon for a pane.
@@ -637,6 +664,7 @@ pub trait Multiplexer: Send + Sync {
         task_agent: Option<&str>,
     ) -> Result<PaneSetupResult> {
         if panes.is_empty() {
+            self.finish_pane_setup(&[initial_pane_id.to_string()])?;
             return Ok(PaneSetupResult {
                 focus_pane_id: initial_pane_id.to_string(),
                 zoom_pane_id: None,
@@ -692,6 +720,11 @@ pub trait Multiplexer: Send + Sync {
                     )?
                 };
 
+                let mut launch_guard = PaneLaunchGuard {
+                    backend: self,
+                    pane: &spawned_id,
+                    armed: true,
+                };
                 handshake.wait()?;
 
                 // Inject resume/continue arguments for agent panes when requested
@@ -795,7 +828,7 @@ pub trait Multiplexer: Send + Sync {
                     resolved.render_command()
                 };
 
-                let final_command = if is_agent_pane && self.name() == "zellij" {
+                let final_command = if is_agent_pane && matches!(self.name(), "zellij" | "herdr") {
                     command_with_status_target(
                         &final_command,
                         self.name(),
@@ -808,6 +841,8 @@ pub trait Multiplexer: Send + Sync {
 
                 let _ = self.clear_pane(&spawned_id);
                 self.send_keys(&spawned_id, &final_command)?;
+                launch_guard.armed = false;
+                drop(launch_guard);
 
                 // Set working status for agent panes with injected prompts
                 if resolved.prompt_injected
@@ -864,6 +899,7 @@ pub trait Multiplexer: Send + Sync {
             }
         }
 
+        self.finish_pane_setup(&pane_ids)?;
         Ok(PaneSetupResult {
             focus_pane_id: focus_pane_id.unwrap_or_else(|| pane_ids[0].clone()),
             zoom_pane_id,
@@ -993,7 +1029,7 @@ pub fn detect_backend() -> BackendType {
             Ok(bt) => return bt,
             Err(_) => {
                 eprintln!(
-                    "workmux: invalid WORKMUX_BACKEND={val:?}, expected tmux|wezterm|kitty|zellij"
+                    "workmux: invalid WORKMUX_BACKEND={val:?}, expected tmux|wezterm|kitty|zellij|herdr"
                 );
             }
         }
@@ -1008,7 +1044,7 @@ pub fn detect_backend_strict() -> Result<BackendType> {
         && !value.trim().is_empty()
     {
         return value.parse().map_err(|_| {
-            anyhow!("invalid WORKMUX_BACKEND={value:?}, expected tmux|wezterm|kitty|zellij")
+            anyhow!("invalid WORKMUX_BACKEND={value:?}, expected tmux|wezterm|kitty|zellij|herdr")
         });
     }
 
@@ -1016,14 +1052,22 @@ pub fn detect_backend_strict() -> Result<BackendType> {
 }
 
 fn detect_backend_from_environment() -> BackendType {
-    resolve_backend(
+    let detected = resolve_backend(
         std::env::var("TMUX").is_ok(),
         std::env::var("WEZTERM_PANE").is_ok(),
         std::env::var("ZELLIJ").is_ok()
             || std::env::var("ZELLIJ_PANE_ID").is_ok()
             || std::env::var("ZELLIJ_SESSION_NAME").is_ok(),
         std::env::var("KITTY_WINDOW_ID").is_ok(),
-    )
+    );
+    if detected == BackendType::Tmux
+        && std::env::var_os("TMUX").is_none()
+        && std::env::var_os("HERDR_SOCKET_PATH").is_some()
+    {
+        BackendType::Herdr
+    } else {
+        detected
+    }
 }
 
 /// Pure auto-detection logic, separated for testability.
@@ -1054,6 +1098,7 @@ pub fn create_backend(backend_type: BackendType) -> Arc<dyn Multiplexer> {
         BackendType::WezTerm => Arc::new(wezterm::WezTermBackend::new()),
         BackendType::Kitty => Arc::new(kitty::KittyBackend::new()),
         BackendType::Zellij => Arc::new(zellij::ZellijBackend::new()),
+        BackendType::Herdr => Arc::new(HerdrBackend::new()),
     }
 }
 
@@ -1064,6 +1109,7 @@ pub fn create_backend_for_instance(
     match backend_type {
         BackendType::Tmux => Arc::new(TmuxBackend::for_socket(instance)),
         BackendType::Zellij => Arc::new(zellij::ZellijBackend::for_session(instance)),
+        BackendType::Herdr => Arc::new(HerdrBackend::for_socket(instance)),
         _ => create_backend(backend_type),
     }
 }
