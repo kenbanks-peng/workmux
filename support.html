@@ -14,8 +14,8 @@
     th, td { padding: 9px 12px; border-bottom: 1px solid light-dark(#ddd, #383838); text-align: left; }
     thead { background: light-dark(#f3f5f7, #24272b); }
     tbody th { font-weight: 500; }
-    th:nth-child(n+3), td:nth-child(n+3) { text-align: center; min-width: 64px; }
-    td:nth-child(2) { color: light-dark(#555, #bbb); }
+    th:nth-child(n+2):nth-child(-n+5), td:nth-child(n+2):nth-child(-n+5) { text-align: center; min-width: 64px; }
+    td:last-child { color: light-dark(#555, #bbb); }
     .yes { color: light-dark(#16713d, #73d69b); }
     .no { color: light-dark(#a52a2a, #ff9999); }
     .unknown { color: light-dark(#805900, #ebc56a); }
@@ -29,28 +29,28 @@
   <p id="legend">✓ Supported · ✗ Not supported · ◐ Partial or requires custom configuration · ? Not verified end to end. Support is based on the adapter code and support records, not new live tests. A check does not mean all options have been tested.</p>
   <div class="table-wrap">
     <table aria-describedby="legend">
-      <thead><tr><th scope="col">Functionality</th><th scope="col">Comment</th><th scope="col">tmux</th><th scope="col">WezTerm</th><th scope="col">kitty</th><th scope="col">Herdr</th></tr></thead>
+      <thead><tr><th scope="col">Functionality</th><th scope="col">tmux</th><th scope="col">WezTerm</th><th scope="col">kitty</th><th scope="col">Herdr</th><th scope="col">Comment</th></tr></thead>
       <tbody>
-        <tr><th scope="row">Create / open worktrees</th><td>WezTerm, kitty, and Herdr use tabs. External Herdr calls need an explicit parent workspace.</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">List worktrees</th><td></td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Close / remove worktrees</th><td>Herdr preserves foreign panes and reports incomplete cleanup.</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Deferred cleanup</th><td>Herdr requires Python 3.</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Session mode</th><td>WezTerm, kitty, and Herdr reject <code>--session</code>.</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
-        <tr><th scope="row">Pane splits / command launch</th><td>WezTerm ignores absolute split sizes. Herdr split sizes must be 10–90%.</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Focus / zoom panes</th><td>WezTerm and kitty support focus, but do not implement workmux zoom. WezTerm cross-workspace navigation requires a Lua handler.</td><td class="yes">✓</td><td class="unknown">◐</td><td class="unknown">◐</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Send input / capture output</th><td>Adapter operations supported; full CLI option coverage is pending.</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Native agent status display</th><td>WezTerm status display is not implemented. kitty exports user variables; display requires a custom <code>tab_bar.py</code>.</td><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="yes">✓</td></tr>
-        <tr><th scope="row">Clear status on focus</th><td>kitty requires a watcher that uses its auto-clear variable. WezTerm and Herdr do not implement focus acknowledgement.</td><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="no">✗</td></tr>
-        <tr><th scope="row">Sidebar</th><td>Tmux-only; planned Herdr sidebar is not integrated.</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
-        <tr><th scope="row">Dashboard / diff / patch actions</th><td>Shared dashboard code exists. Full WezTerm, kitty, and Herdr UI acceptance is pending.</td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Popup workflows</th><td>WezTerm and kitty popup workflows are not verified. Herdr caller detection exists; command restrictions remain.</td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Merge / rebase / rename / resurrect</th><td>Shared workflows remain; complete backend acceptance is pending.</td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">PR / MR creation, multiple agents, continue / fork</th><td></td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Status / wait / last-agent navigation</th><td></td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Run commands with output / exit tracking</th><td></td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Agent reaping</th><td>Herdr-specific process targeting is not added.</td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Sandbox / host RPC / clipboard</th><td>Herdr-specific sandbox identity routing is not added.</td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
-        <tr><th scope="row">Hooks / file sync / headless workflows</th><td>Shared code is unchanged; complete backend acceptance is pending.</td><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td></tr>
+        <tr><th scope="row">Create / open worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>External Herdr calls need an explicit parent workspace.</td></tr>
+        <tr><th scope="row">List worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
+        <tr><th scope="row">Close / remove worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>Herdr preserves foreign panes and reports incomplete cleanup.</td></tr>
+        <tr><th scope="row">Deferred cleanup</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>Herdr requires Python 3.</td></tr>
+        <tr><th scope="row">Session mode</th><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td></td></tr>
+        <tr><th scope="row">Pane splits / command launch</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>Herdr split sizes must be 10–90%.</td></tr>
+        <tr><th scope="row">Focus / zoom panes</th><td class="yes">✓</td><td class="unknown">◐</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
+        <tr><th scope="row">Send input / capture output</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
+        <tr><th scope="row">Native agent status display</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
+        <tr><th scope="row">Clear status on focus</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="no">✗</td><td></td></tr>
+        <tr><th scope="row">Sidebar</th><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td></td></tr>
+        <tr><th scope="row">Dashboard / diff / patch actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td></td></tr>
+        <tr><th scope="row">Popup workflows</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Herdr caller detection exists; command restrictions remain.</td></tr>
+        <tr><th scope="row">Merge / rebase / rename / resurrect</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td></td></tr>
+        <tr><th scope="row">PR / MR creation, multiple agents, continue / fork</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td></td></tr>
+        <tr><th scope="row">Status / wait / last-agent navigation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td></td></tr>
+        <tr><th scope="row">Run commands with output / exit tracking</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td></td></tr>
+        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Herdr-specific process targeting is not added.</td></tr>
+        <tr><th scope="row">Sandbox / host RPC / clipboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Herdr-specific sandbox identity routing is not added.</td></tr>
+        <tr><th scope="row">Hooks / file sync / headless workflows</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td></td></tr>
       </tbody>
     </table>
   </div>
