@@ -1,10 +1,14 @@
 //! Herdr 0.9.0 / protocol 22: workmux sessions are workspaces, windows are tabs.
 //! Public focus is native broadcast focus. No implicit endpoint or last-focus fallback.
 mod client;
+mod deferred;
+pub use deferred::run as run_deferred_operation;
 #[cfg(test)]
 mod cleanup_tests;
 #[cfg(test)]
 mod deferred_tests;
+#[cfg(test)]
+mod deferred_unit_tests;
 mod identity;
 mod pane_launch;
 #[cfg(test)]
@@ -527,7 +531,10 @@ impl HerdrBackend {
             }))?;
             // Tab records can be stale after a native move. The live terminal
             // owns the token; only a replacement inherits its primary role.
-            if self.terminal_record(&live_destination.terminal_id)?.is_some() {
+            if self
+                .terminal_record(&live_destination.terminal_id)?
+                .is_some()
+            {
                 let owner = self.verified_terminal(&live_destination)?;
                 let mut record = self.verified_terminal(&self.pane(&key)?)?;
                 record.token = owner.token;
@@ -608,14 +615,12 @@ impl HerdrBackend {
         self.client.request(method, json!({"pane_id":p.pane_id}))?;
         Ok(())
     }
-    fn deferred_command(&self, action: &str, target_id: &str) -> Result<String> {
-        let python =
-            which::which("python3").context("Herdr deferred cleanup requires Python 3 on PATH")?;
+    fn deferred_command(&self, action: deferred::Action, target_id: &str) -> Result<String> {
         let target = self.raw(target_id)?;
         let snapshot = self.client.snapshot()?;
-        let workspace = action.ends_with("workspace");
+        let workspace = action.workspace();
         let mut terminals = HashMap::new();
-        if action.starts_with("close-") {
+        if action.close() {
             for tab in snapshot.tabs.iter().filter(|tab| {
                 if workspace {
                     tab.workspace_id == target
@@ -649,19 +654,14 @@ impl HerdrBackend {
                 );
             }
         }
-        let payload = serde_json::to_string(&json!({
-            "endpoint": self.client.endpoint,
-            "boot": self.client.boot()?,
-            "action": action,
-            "target": target,
-            "terminals": terminals,
-        }))?;
-        Ok(format!(
-            "{} -I -c {} {}",
-            agent::shell_quote(&python.to_string_lossy()),
-            agent::shell_quote(include_str!("deferred.py")),
-            agent::shell_quote(&payload),
-        ))
+        deferred::Operation {
+            endpoint: self.client.endpoint.clone(),
+            boot: self.client.boot()?,
+            action,
+            target: target.to_string(),
+            terminals,
+        }
+        .command()
     }
     /// `pane.read` is capped at 1000 rows. Selection reads are read-only and
     /// accept absolute history coordinates. Split a batch only when native copy
@@ -1011,11 +1011,7 @@ impl Multiplexer for HerdrBackend {
     }
     fn kill_window_target(&self, target: &WindowTarget) -> Result<()> {
         let tab = self.tab(target)?;
-        self.close_captured_tabs(
-            &self.client.snapshot()?,
-            &HashSet::from([tab.tab_id]),
-            None,
-        )
+        self.close_captured_tabs(&self.client.snapshot()?, &HashSet::from([tab.tab_id]), None)
     }
     fn rename_window(&self, old: &str, new: &str) -> Result<()> {
         let tab = self.tab(&WindowTarget::new(old.into(), None))?;
@@ -1340,13 +1336,13 @@ impl Multiplexer for HerdrBackend {
     fn schedule_window_target_close(&self, t: &WindowTarget, delay: Duration) -> Result<()> {
         let tab = self.tab(t)?;
         let target = self.key(&tab.tab_id)?;
-        let command = self.deferred_command("close-tab", &target)?;
+        let command = self.deferred_command(deferred::Action::CloseTab, &target)?;
         self.run_deferred_script(&format!("sleep {}; {command}", delay.as_secs_f64()))
     }
     fn schedule_session_close(&self, name: &str, delay: Duration) -> Result<()> {
         let workspace = self.session(name)?;
         let target = self.key(&workspace.workspace_id)?;
-        let command = self.deferred_command("close-workspace", &target)?;
+        let command = self.deferred_command(deferred::Action::CloseWorkspace, &target)?;
         self.run_deferred_script(&format!("sleep {}; {command}", delay.as_secs_f64()))
     }
     fn session_close_handles_navigation(&self) -> bool {
@@ -1371,7 +1367,7 @@ impl Multiplexer for HerdrBackend {
                 .any(|tab| tab.tab_id == tab_id),
             "Herdr tab no longer exists"
         );
-        self.deferred_command("close-tab", id)
+        self.deferred_command(deferred::Action::CloseTab, id)
     }
     fn shell_close_session_by_id_guard_cmd(&self, id: &str, _: Option<&str>) -> Result<String> {
         let workspace_id = self.raw(id)?;
@@ -1383,27 +1379,33 @@ impl Multiplexer for HerdrBackend {
                 .any(|workspace| workspace.workspace_id == workspace_id),
             "Herdr workspace no longer exists"
         );
-        self.deferred_command("close-workspace", id)
+        self.deferred_command(deferred::Action::CloseWorkspace, id)
     }
     fn shell_select_window_cmd(&self, full_name: &str) -> Result<String> {
         let tab = self.tab(&WindowTarget::new(full_name.into(), None))?;
-        self.deferred_command("focus-tab", &self.key(&tab.tab_id)?)
+        self.deferred_command(deferred::Action::FocusTab, &self.key(&tab.tab_id)?)
     }
     fn shell_kill_window_cmd(&self, full_name: &str) -> Result<String> {
         let tab = self.tab(&WindowTarget::new(full_name.into(), None))?;
-        self.deferred_command("close-tab", &self.key(&tab.tab_id)?)
+        self.deferred_command(deferred::Action::CloseTab, &self.key(&tab.tab_id)?)
     }
     fn shell_kill_window_target_cmd(&self, target: &WindowTarget) -> Result<String> {
         let tab = self.tab(target)?;
-        self.deferred_command("close-tab", &self.key(&tab.tab_id)?)
+        self.deferred_command(deferred::Action::CloseTab, &self.key(&tab.tab_id)?)
     }
     fn shell_switch_session_cmd(&self, full_name: &str) -> Result<String> {
         let workspace = self.session(full_name)?;
-        self.deferred_command("focus-workspace", &self.key(&workspace.workspace_id)?)
+        self.deferred_command(
+            deferred::Action::FocusWorkspace,
+            &self.key(&workspace.workspace_id)?,
+        )
     }
     fn shell_kill_session_cmd(&self, full_name: &str) -> Result<String> {
         let workspace = self.session(full_name)?;
-        self.deferred_command("close-workspace", &self.key(&workspace.workspace_id)?)
+        self.deferred_command(
+            deferred::Action::CloseWorkspace,
+            &self.key(&workspace.workspace_id)?,
+        )
     }
 }
 

@@ -43,6 +43,7 @@ def env_for(server):
         "HERDR_SOCKET_PATH": str(server.socket_path),
         "WORKMUX_BACKEND": "herdr",
         "WORKMUX_SKIP_UPDATE_CHECK": "1",
+        "WORKMUX_HERDR_TEST_EXECUTABLE": str(ROOT / "target/debug/workmux"),
     }
 
 

@@ -258,6 +258,8 @@ impl From<CliMuxMode> for MuxMode {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(name = "_herdr-deferred", hide = true)]
+    HerdrDeferred { payload: String },
     #[command(name = "_deferred-cleanup", hide = true)]
     DeferredCleanup {
         #[arg(long, allow_hyphen_values = true)]
@@ -962,6 +964,11 @@ pub fn run() -> Result<()> {
         }
     };
 
+    // Internal workers must not load project configuration or start setup/update work.
+    if let Commands::HerdrDeferred { payload } = &cli.command {
+        return crate::multiplexer::herdr::run_deferred_operation(payload);
+    }
+
     // Extract config override early so the side-effect loads (nerdfont, update
     // check) respect the user's explicit --config choice.
     let config_override = match &cli.command {
@@ -1007,6 +1014,7 @@ pub fn run() -> Result<()> {
     }
 
     match cli.command {
+        Commands::HerdrDeferred { .. } => unreachable!("dispatched before configuration"),
         Commands::DeferredCleanup {
             worktree_path,
             branch_name,

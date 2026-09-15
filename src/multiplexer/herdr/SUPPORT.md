@@ -37,10 +37,11 @@ cleanup reports a partial-cleanup error. Already closed owned panes are not
 restored. A foreign pane present at the initial check blocks cleanup before any
 pane is closed.
 
-Deferred operations require `python3` on PATH. The embedded standard-library
-helper checks the server lifetime on each connection and checks terminal
-identities before cleanup. This avoids a new workmux CLI command. Scheduled
-cleanup runs in a detached process, not a thread that dies with the caller.
+Deferred operations use the same workmux executable through the private
+`_herdr-deferred` command. The Rust helper shares the adapter's transport and
+process identity checks. It checks the captured server lifetime on each connection
+and terminal identities before cleanup. Scheduled cleanup runs in a detached
+process, not a thread that dies with the caller. Python is not required at runtime.
 
 ## Core restrictions
 
