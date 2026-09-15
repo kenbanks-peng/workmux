@@ -1191,7 +1191,7 @@ impl Multiplexer for HerdrBackend {
         } else {
             self.capture_history_rows(&pane, lines).ok()?
         };
-        Some(util::tail_lines(text.trim_end_matches(['\n', '\r']), lines))
+        Some(util::tail_lines(&text, lines))
     }
     fn send_text_fragment(&self, p: &str, text: &str) -> Result<()> {
         self.client.request(

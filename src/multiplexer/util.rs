@@ -34,9 +34,10 @@ pub fn is_posix_shell(shell: &str) -> bool {
     matches!(shell_name, "bash" | "zsh" | "sh" | "dash" | "ksh" | "ash")
 }
 
-/// Return the last `lines` lines from terminal output.
+/// Return at most the last `lines` lines, excluding trailing line breaks.
+/// Preserve ANSI escapes, indentation, and blank lines within the output.
 pub fn tail_lines(output: &str, lines: u16) -> String {
-    let all_lines: Vec<&str> = output.lines().collect();
+    let all_lines: Vec<&str> = output.trim_end_matches(['\n', '\r']).lines().collect();
     let start = all_lines.len().saturating_sub(lines as usize);
     all_lines[start..].join("\n")
 }
@@ -377,6 +378,16 @@ mod tests {
         assert_eq!(tail_lines("one\ntwo\nthree", 2), "two\nthree");
         assert_eq!(tail_lines("one\ntwo\nthree", 10), "one\ntwo\nthree");
         assert_eq!(tail_lines("", 5), "");
+        assert_eq!(tail_lines("one\ntwo\nthree\n\n", 2), "two\nthree");
+        assert_eq!(tail_lines("one\r\ntwo\r\n\r\n", 2), "one\ntwo");
+        assert_eq!(tail_lines("\n\r\n", 5), "");
+        assert_eq!(tail_lines("one\ntwo\n", 0), "");
+        assert_eq!(tail_lines("\n  one\n\n  two  \n", 4), "\n  one\n\n  two  ");
+        assert_eq!(tail_lines("one\n \n", 2), "one\n ");
+        assert_eq!(
+            tail_lines("old\n\x1b[31mred\x1b[0m\n\n", 1),
+            "\x1b[31mred\x1b[0m"
+        );
     }
 
     #[test]
