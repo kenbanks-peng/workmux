@@ -16,11 +16,13 @@ WORKMUX_BACKEND=herdr HERDR_SOCKET_PATH=/absolute/path/herdr.sock \
 
 ## Implementation boundary
 
-All platform code and integration tests are in this directory. The only shared
-changes are backend registration and two multiplexer launch lifecycle hooks.
-The command, workflow, state, sandbox, sidebar, and other backend files are
-unchanged. These constraints supersede the earlier shared-interface design in
-`docs/design/herdr-support.md` for this implementation.
+All platform code and integration tests are in this directory. Shared changes
+cover backend registration, two multiplexer launch lifecycle hooks, and the
+explicit status-target allowlist. The allowlist accepts Herdr; the adapter still
+validates the endpoint and server-lifetime-qualified terminal identity. Workflow,
+state, sandbox, sidebar, and other backend files are unchanged. These constraints
+supersede the earlier shared-interface design in `docs/design/herdr-support.md`
+for this implementation.
 
 The adapter supplies tab creation and placement, pane splits, controlled command
 launch, input, capture, focus, zoom, names, ownership checks, native agent reports,
@@ -51,8 +53,9 @@ This is not full feature parity with tmux:
 - The unchanged sidebar is tmux-only. No separate Herdr sidebar is installed.
 - No automatic focus acknowledgement runtime is installed. Native status does
   not automatically clear on focus. Workmux retains its existing agent state.
-- Herdr-specific sandbox identity routing and process-directed agent reaping
-  are not added. These paths must not be treated as verified Herdr support.
+- Herdr-specific sandbox identity routing is not verified. Shared agent reaping
+  passed with a cooperative stub: dry-run, Ctrl-C exit, and state removal.
+  Ctrl-D fallback and unresponsive agents remain unverified.
 - Popup opening remains subject to the existing command's backend restrictions.
   The adapter can resolve the caller of a native Herdr popup.
 
@@ -63,6 +66,7 @@ No tmux emulation, plugin, configuration rewrite, or core bypass is used.
 ```sh
 cargo test
 python3 src/multiplexer/herdr/integration/run.py
+python3 src/multiplexer/herdr/integration/support_checks.py
 ```
 
 The integration runner starts private servers with temporary HOME and XDG
@@ -77,6 +81,25 @@ or new tab. A protocol proxy inserts a foreign terminal just before the first
 close request. Each case checks that `tab.close` or `workspace.close` was sent
 and that the target and the inserted terminal were removed. A separate probe checks launch
 ownership after a native move into a tab with stale ownership metadata.
+
+On 2026-09-15, the private-server runner and all 15 support probes passed on
+macOS without the status workaround. An ordinary agent stub launch registers
+with its original `WORKMUX_STATUS_*` variables. Detached hooks work without
+native Herdr variables or process ancestry. Working, waiting, done, and clear
+agree with Workmux JSON state and native reports: waiting maps to `blocked`,
+done maps to `idle`, and clear maps to `unknown` in protocol 22. Native agent
+recognition can display idle as done. No label change is needed for routing.
+
+Status tests cover moved-terminal registration and later hooks, closed terminals,
+invalid and partial targets, endpoint separation, and server restart. Rejected
+hooks do not change native status or stored records and do not fall back to the
+caller's pane. Hook commands retain their existing best-effort exit behavior;
+command success alone is not evidence of an update.
+
+Wait releases on done; run retains output, exit status 7, and background output.
+The dashboard renders done and focuses the agent on Enter. Multiple-agent and
+continue/fork stub launches register and report working. These are not real
+agent replay or sandbox checks. Linux was not retested for this change.
 
 The retained task-06 layout trees, journals, locks, spacing calibration, and
 sidebar recovery tests remain reference work. They are not integrated or

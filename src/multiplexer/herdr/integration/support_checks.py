@@ -89,13 +89,8 @@ class Fixture:
             raise
         return int(code.read_text()), output.read_text()
 
-    def wm(self, *args, workaround=False):
-        prefix = ["env"]
-        if workaround:
-            for key in ("BACKEND", "INSTANCE", "PANE_ID"):
-                prefix.extend(["-u", f"WORKMUX_STATUS_{key}"])
-        prefix.extend(["WORKMUX_BACKEND=herdr", str(BINARY), *args])
-        return shlex.join(prefix)
+    def wm(self, *args):
+        return shlex.join([str(BINARY), *args])
 
     def add(self, name="feature"):
         self.run("add", name, "--parent-session", "parent", "--background")
@@ -126,54 +121,198 @@ def sidebar(f):
     print("PASS sidebar: explicit tmux-only rejection")
 
 
+def launch_status_agent(f, name="feature", hold=True):
+    """Use normal agent launch variables and the real registration hook."""
+    ready = f.server.root / f"{name}-environment.json"
+    stub = f.server.root / "claude"
+    stub.write_text(
+        f"#!{sys.executable}\nimport json, os, subprocess, time\n"
+        f"subprocess.run([{str(BINARY)!r}, 'register-agent'], check=True)\n"
+        f"with open({str(ready)!r}, 'w') as output: json.dump(dict(os.environ), output)\n"
+        f"time.sleep({120 if hold else 0})\n"
+    )
+    stub.chmod(0o700)
+    f.config({"agent": str(stub), "panes": [{"command": "<agent>"}]})
+    pane = f.add(name)
+    wait_until(lambda: ready.exists() and ready.read_text())
+    environment = json.loads(ready.read_text())
+    assert environment["WORKMUX_STATUS_BACKEND"] == "herdr", environment
+    assert environment["WORKMUX_STATUS_INSTANCE"] == str(f.server.socket_path.resolve())
+    assert environment["WORKMUX_STATUS_PANE_ID"].endswith("~" + pane["terminal_id"])
+    # Hooks can run outside the terminal, without native variables or ancestry.
+    environment = {
+        key: value
+        for key, value in environment.items()
+        if not key.startswith("HERDR_") and key != "WORKMUX_BACKEND"
+    }
+    return pane, environment
+
+
+def assert_status(f, pane, state):
+    agents = json.loads(f.run("status", "--json").stdout)["agents"]
+    assert len(agents) == 1 and agents[0]["status"] == state, agents
+    report = next(
+        p
+        for p in f.server.request("session.snapshot")["snapshot"]["panes"]
+        if p["terminal_id"] == pane["terminal_id"]
+    )
+    assert (
+        report.get("agent_status")
+        == {
+            "working": "working",
+            "waiting": "blocked",
+            # Protocol 22 reports Workmux completion as idle, not a new state.
+            "done": "idle",
+            "-": "unknown",
+        }[state]
+    ), report
+
+
 def status(f):
-    pane = f.add()
-    f.server.request("pane.rename", pane_id=pane["pane_id"], label="claude")
-    code, output = f.native(pane, f.wm("set-window-status", "done", workaround=True))
-    assert code == 0, output
-    records = list(Path(f.env["XDG_STATE_HOME"]).glob("workmux/agents/*.json"))
-    assert len(records) == 1, records
-    key = json.loads(records[0].read_text())["pane_key"]["pane_id"]
-    targeted = (
-        shlex.join(
-            [
-                "env",
-                "WORKMUX_STATUS_BACKEND=herdr",
-                f"WORKMUX_STATUS_INSTANCE={f.server.socket_path.resolve()}",
-                f"WORKMUX_STATUS_PANE_ID={key}",
-            ]
-        )
-        + " "
-        + f.wm("set-window-status", "working")
-    )
-    code, output = f.native(pane, targeted)
-    assert code == 0, output
-    before = json.loads(f.run("status", "--json").stdout)
-    assert before["agents"] and before["agents"][0]["status"] == "done", before
-    code, output = f.native(pane, f.wm("set-window-status", "working", workaround=True))
-    assert code == 0, output
-    after = json.loads(f.run("status", "--json").stdout)
-    assert len(after["agents"]) == 1 and after["agents"][0]["status"] == "working", (
-        after
-    )
-    for state in ("waiting", "done", "clear"):
-        code, output = f.native(pane, f.wm("set-window-status", state, workaround=True))
-        assert code == 0, output
-        agents = json.loads(f.run("status", "--json").stdout)["agents"]
-        assert agents and agents[0]["status"] == ("-" if state == "clear" else state), (
-            agents
-        )
-        report = next(
-            p
-            for p in f.server.request("session.snapshot")["snapshot"]["panes"]
-            if p["pane_id"] == pane["pane_id"]
-        )
-        assert (
-            report.get("agent_status")
-            == {"waiting": "blocked", "done": "done", "clear": "unknown"}[state]
-        ), report
+    pane, environment = launch_status_agent(f)
+    assert_status(f, pane, "-")
+    for state in ("working", "waiting", "done", "clear"):
+        f.run("set-window-status", state, env=environment)
+        assert_status(f, pane, "-" if state == "clear" else state)
     print(
-        "PASS status: explicit Herdr target silently ignored; native fallback tracks working/waiting/done/clear in JSON and native reports"
+        "PASS status: ordinary agent launch registers; detached hooks without native variables update working/waiting/done/clear in JSON and native reports"
+    )
+
+
+def status_targets(f):
+    pane, environment = launch_status_agent(f)
+    key = environment["WORKMUX_STATUS_PANE_ID"]
+    boot, _ = key.split("~", 1)
+    f.run("set-window-status", "working", env=environment)
+    # A move across workspaces changes the pane address, not the terminal identity.
+    destination = f.server.request(
+        "workspace.create", label="moved", cwd=str(f.repo), focus=False
+    )["root_pane"]
+    f.server.request(
+        "pane.move",
+        pane_id=pane["pane_id"],
+        destination={
+            "type": "tab",
+            "tab_id": destination["tab_id"],
+            "target_pane_id": destination["pane_id"],
+            "split": "right",
+        },
+        focus=False,
+    )
+    moved = next(
+        p
+        for p in f.server.request("session.snapshot")["snapshot"]["panes"]
+        if p["terminal_id"] == pane["terminal_id"]
+    )
+    assert moved["pane_id"] != pane["pane_id"], moved
+    f.run("register-agent", env=environment)
+    assert_status(f, moved, "-")
+    f.run("set-window-status", "waiting", env=environment)
+    assert_status(f, moved, "waiting")
+
+    def reports(server):
+        return {
+            p["terminal_id"]: p.get("agent_status")
+            for p in server.request("session.snapshot")["snapshot"]["panes"]
+        }
+
+    def reject(target, servers):
+        # Test native fallback suppression as well as detached-hook rejection.
+        before = [reports(server) for server in servers]
+        state_dir = Path(f.env["XDG_STATE_HOME"]) / "workmux/agents"
+        records = {p.name: p.read_bytes() for p in state_dir.glob("*.json")}
+        for args in (
+            ("register-agent",),
+            ("set-window-status", "working"),
+            ("set-window-status", "clear"),
+        ):
+            f.run(*args, env=target)
+            command = shlex.join(
+                [
+                    "env",
+                    *(
+                        f"{k}={v}"
+                        for k, v in target.items()
+                        if k.startswith("WORKMUX_STATUS_")
+                    ),
+                    str(BINARY),
+                    *args,
+                ]
+            )
+            code, output = f.native(f.parent, command)
+            assert code == 0, output  # Hooks are best-effort; check effects below.
+            after = [reports(server) for server in servers]
+            assert after == before, (before, after, args)
+            assert {p.name: p.read_bytes() for p in state_dir.glob("*.json")} == records
+
+    for invalid_key in (
+        pane["terminal_id"],
+        moved["pane_id"],
+        "stale~" + pane["terminal_id"],
+        boot + "~missing-terminal",
+        "",
+    ):
+        reject({**environment, "WORKMUX_STATUS_PANE_ID": invalid_key}, [f.server])
+    for endpoint in ("relative.sock", str(f.server.root / "missing.sock"), ""):
+        reject({**environment, "WORKMUX_STATUS_INSTANCE": endpoint}, [f.server])
+    partial = dict(environment)
+    del partial["WORKMUX_STATUS_PANE_ID"]
+    reject(partial, [f.server])
+
+    other = HerdrServer()
+    try:
+        other.start()
+        other_fixture = Fixture(other)
+        other_pane, other_environment = launch_status_agent(other_fixture)
+        other_fixture.run("set-window-status", "done", env=other_environment)
+        reject(
+            {**environment, "WORKMUX_STATUS_INSTANCE": str(other.socket_path)},
+            [f.server, other],
+        )
+        reject(
+            {
+                **environment,
+                "WORKMUX_STATUS_PANE_ID": other_environment["WORKMUX_STATUS_PANE_ID"],
+            },
+            [f.server, other],
+        )
+        assert_status(other_fixture, other_pane, "done")
+    finally:
+        other.close()
+
+    f.server.request("pane.close", pane_id=moved["pane_id"])
+    reject(environment, [f.server])
+    f.server.stop()
+    f.server.start()
+    snapshot = f.server.request("session.snapshot")["snapshot"]
+    parents = [w for w in snapshot["workspaces"] if w["label"] == "parent"]
+    if parents:
+        assert len(parents) == 1, parents
+        f.parent = next(
+            p
+            for p in snapshot["panes"]
+            if p["workspace_id"] == parents[0]["workspace_id"]
+        )
+    else:
+        f.parent = f.server.request(
+            "workspace.create", label="parent", cwd=str(f.repo), focus=True
+        )["root_pane"]
+    replacement, new_environment = launch_status_agent(f, "replacement")
+    new_key = new_environment["WORKMUX_STATUS_PANE_ID"]
+    assert new_key.split("~", 1)[0] != boot
+    reject(environment, [f.server])
+    # Even an existing terminal cannot be used with the old server lifetime.
+    reject(
+        {
+            **environment,
+            "WORKMUX_STATUS_PANE_ID": boot + "~" + replacement["terminal_id"],
+        },
+        [f.server],
+    )
+    f.run("set-window-status", "working", env=new_environment)
+    assert_status(f, replacement, "working")
+    print(
+        "PASS status targets: moved terminal registration and hooks; invalid, partial, closed, foreign-endpoint and stale-lifetime targets leave native reports and state unchanged"
     )
 
 
@@ -181,7 +320,7 @@ def focus(f):
     pane = f.add()
     f.server.attach()
     for state in ("waiting", "done"):
-        code, output = f.native(pane, f.wm("set-window-status", state, workaround=True))
+        code, output = f.native(pane, f.wm("set-window-status", state))
         assert code == 0, output
         f.server.request("pane.focus", pane_id=f.parent["pane_id"])
         f.server.request("pane.focus", pane_id=pane["pane_id"])
@@ -194,9 +333,9 @@ def focus(f):
 
 
 def wait(f):
-    pane = f.add()
-    code, output = f.native(pane, f.wm("set-window-status", "working", workaround=True))
-    assert code == 0, output
+    pane, environment = launch_status_agent(f)
+    f.run("set-window-status", "working", env=environment)
+    assert_status(f, pane, "working")
     result = f.run("wait", "feature", "--status", "done", "--timeout", "1", ok=False)
     assert result.returncode == 1 and "Timeout" in result.stderr, result
     with subprocess.Popen(
@@ -209,10 +348,8 @@ def wait(f):
     ) as process:
         time.sleep(0.3)
         assert process.poll() is None
-        code, output = f.native(
-            pane, f.wm("set-window-status", "done", workaround=True)
-        )
-        assert code == 0, output
+        f.run("set-window-status", "done", env=environment)
+        assert_status(f, pane, "done")
         stdout, stderr = process.communicate(timeout=15)
         assert process.returncode == 0 and "done" in stderr, stdout + stderr
     print(
@@ -221,9 +358,9 @@ def wait(f):
 
 
 def run_commands(f):
-    pane = f.add()
-    code, output = f.native(pane, f.wm("set-window-status", "working", workaround=True))
-    assert code == 0, output
+    pane, environment = launch_status_agent(f)
+    f.run("set-window-status", "working", env=environment)
+    assert_status(f, pane, "working")
     result = f.run(
         "run", "feature", "--", "sh", "-c", "printf tracked-output; exit 7", ok=False
     )
@@ -270,7 +407,14 @@ def hooks(f):
 def multi(f):
     marker = f.server.root / "launches"
     stub = f.server.root / "claude"
-    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$PWD\" >> {marker}\nsleep 120\n")
+    stub.write_text(
+        "#!/bin/sh\n"
+        + f.wm("register-agent")
+        + "\n"
+        + f.wm("set-window-status", "working")
+        + "\n"
+        + f"printf '%s\\n' \"$PWD\" >> {marker}\nsleep 120\n"
+    )
     stub.chmod(0o700)
     f.config({"agent": str(stub), "panes": [{"command": "<agent>"}]})
     result = f.run(
@@ -290,8 +434,16 @@ def multi(f):
     assert code == 0, output
     wait_until(lambda: marker.exists() and len(marker.read_text().splitlines()) == 2)
     assert len(set(marker.read_text().splitlines())) == 2
+    agents = json.loads(f.run("status", "--json").stdout)["agents"]
+    assert len(agents) == 2 and all(a["status"] == "working" for a in agents), agents
+    reports = f.server.request("session.snapshot")["snapshot"]["panes"]
+    for agent in agents:
+        report = next(
+            p for p in reports if agent["pane_id"].endswith("~" + p["terminal_id"])
+        )
+        assert report.get("agent_status") == "working", report
     print(
-        "PASS multi: two native stub launches in separate worktrees; external --parent-session rejected"
+        "PASS multi: two native stub launches register and report working in separate worktrees; external --parent-session rejected"
     )
 
 
@@ -303,7 +455,14 @@ def continue_fork(f):
     ):
         marker = f.server.root / f"{agent}-args"
         stub = f.server.root / agent
-        stub.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {marker}\n")
+        stub.write_text(
+            "#!/bin/sh\n"
+            + f.wm("register-agent")
+            + "\n"
+            + f.wm("set-window-status", "working")
+            + "\n"
+            + f"printf '%s\\n' \"$@\" > {marker}\n"
+        )
         stub.chmod(0o700)
         f.config({"agent": str(stub), "panes": [{"command": "<agent>"}]})
         f.run(
@@ -316,6 +475,9 @@ def continue_fork(f):
         )
         wait_until(lambda marker=marker: marker.exists() and marker.read_text())
         assert marker.read_text().splitlines() == expected, marker.read_text()
+        agents = json.loads(f.run("status", "--json").stdout)["agents"]
+        resumed = [a for a in agents if a["worktree"] == f"resume-{agent}"]
+        assert len(resumed) == 1 and resumed[0]["status"] == "working", agents
     f.config(
         {"agent": str(f.server.root / "claude"), "panes": [{"command": "<agent>"}]}
     )
@@ -339,15 +501,18 @@ def continue_fork(f):
     assert "--resume" in marker.read_text(), marker.read_text()
     copies = list(source.parent.parent.glob("*forked/*.jsonl"))
     assert len(copies) == 1 and copies[0].read_text() == source.read_text(), copies
+    agents = json.loads(f.run("status", "--json").stdout)["agents"]
+    forked = [a for a in agents if a["worktree"] == "forked"]
+    assert len(forked) == 1 and forked[0]["status"] == "working", agents
     print(
         "PASS continue/fork: Claude/Codex/pi resume flags; Claude conversation copy and --resume launch (stubs, no real agent session)"
     )
 
 
 def dashboard(f):
-    pane = f.add()
-    code, output = f.native(pane, f.wm("set-window-status", "done", workaround=True))
-    assert code == 0, output
+    pane, environment = launch_status_agent(f, hold=False)
+    f.run("set-window-status", "done", env=environment)
+    assert_status(f, pane, "done")
     f.server.request("pane.focus", pane_id=f.parent["pane_id"])
     f.server.attach()
     done = f.server.root / "dashboard-exit"
@@ -361,7 +526,7 @@ def dashboard(f):
             "pane.read", pane_id=f.parent["pane_id"], source="visible"
         )["read"]["text"]
 
-    wait_until(lambda: "feature" in screen() and "done" in screen(), timeout=15)
+    wait_until(lambda: "feature" in screen() and "✅" in screen(), timeout=15)
     f.server.request("pane.send_keys", pane_id=f.parent["pane_id"], keys=["enter"])
     wait_until(lambda: done.exists() and done.read_text() == "0")
     snapshot = f.server.request("session.snapshot")["snapshot"]
@@ -398,7 +563,7 @@ def navigation(f):
 
 def resurrect(f):
     pane = f.add()
-    code, output = f.native(pane, f.wm("set-window-status", "done", workaround=True))
+    code, output = f.native(pane, f.wm("set-window-status", "done"))
     assert code == 0, output
     f.server.request("tab.close", tab_id=pane["tab_id"])
     result = f.run("resurrect", "--dry-run")
@@ -410,7 +575,7 @@ def resurrect(f):
     snapshot = f.server.request("session.snapshot")["snapshot"]
     tab = next(t for t in snapshot["tabs"] if t["label"] == "wm-feature")
     pane = next(p for p in snapshot["panes"] if p["tab_id"] == tab["tab_id"])
-    code, output = f.native(pane, f.wm("set-window-status", "done", workaround=True))
+    code, output = f.native(pane, f.wm("set-window-status", "done"))
     assert code == 0, output
     f.server.stop()
     f.server.start()
@@ -430,9 +595,7 @@ def reap(f):
     stub = f.server.root / "claude"
     stub.write_text(
         f"#!{sys.executable}\nimport os, signal, subprocess, time\n"
-        "for key in list(os.environ):\n"
-        "    if key.startswith('WORKMUX_STATUS_'): del os.environ[key]\n"
-        "os.environ['WORKMUX_BACKEND'] = 'herdr'\n"
+        f"subprocess.run([{str(BINARY)!r}, 'register-agent'], check=True)\n"
         f"subprocess.run([{str(BINARY)!r}, 'set-window-status', 'working'], check=True)\n"
         f"open({str(ready)!r}, 'w').write('ready')\n"
         "try:\n    while True: time.sleep(1)\n"
@@ -506,6 +669,7 @@ CASES = {
     "session": session,
     "sidebar": sidebar,
     "status": status,
+    "status-targets": status_targets,
     "focus": focus,
     "wait": wait,
     "run": run_commands,

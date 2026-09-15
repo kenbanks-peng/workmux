@@ -54,7 +54,10 @@ impl StatusTarget {
             .ok_or_else(|| anyhow::anyhow!("{} is missing", STATUS_TARGET_BACKEND_ENV))?
             .parse::<BackendType>()
             .map_err(anyhow::Error::msg)?;
-        if !matches!(backend, BackendType::Tmux | BackendType::Zellij) {
+        if !matches!(
+            backend,
+            BackendType::Tmux | BackendType::Zellij | BackendType::Herdr
+        ) {
             return Err(anyhow::anyhow!(
                 "status targets do not support the {} backend",
                 backend
@@ -494,11 +497,61 @@ mod tests {
     }
 
     #[test]
+    fn status_target_accepts_herdr_identity_for_adapter_validation() {
+        assert_eq!(
+            StatusTarget::from_values(
+                Some("herdr".to_string()),
+                Some("/tmp/herdr.sock".to_string()),
+                Some("server-lifetime~terminal-id".to_string()),
+            )
+            .unwrap(),
+            Some(StatusTarget {
+                backend: BackendType::Herdr,
+                instance: "/tmp/herdr.sock".to_string(),
+                pane_id: "server-lifetime~terminal-id".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn status_target_rejects_partial_identity() {
         assert!(
             StatusTarget::from_values(Some("zellij".to_string()), Some("dev".to_string()), None,)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn status_target_rejects_incomplete_herdr_identity() {
+        for (instance, pane_id) in [
+            (None, Some("boot~terminal")),
+            (Some("/tmp/herdr.sock"), None),
+            (Some(""), Some("boot~terminal")),
+            (Some("/tmp/herdr.sock"), Some("")),
+        ] {
+            assert!(
+                StatusTarget::from_values(
+                    Some("herdr".to_string()),
+                    instance.map(str::to_string),
+                    pane_id.map(str::to_string),
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn status_target_keeps_unsupported_backends_rejected() {
+        for backend in ["wezterm", "kitty", "unknown"] {
+            assert!(
+                StatusTarget::from_values(
+                    Some(backend.to_string()),
+                    Some("instance".to_string()),
+                    Some("pane".to_string()),
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

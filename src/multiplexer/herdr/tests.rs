@@ -54,6 +54,15 @@ fn isolated_core_operations() -> Result<()> {
     assert_ne!(backend.server_boot_id()?, other.server_boot_id()?);
     assert!(other.select_pane(&first).is_err());
     assert!(backend.select_pane(&foreign).is_err());
+    // Status validation must not adopt a foreign endpoint or an unqualified ID.
+    for invalid in [&foreign, &first_pane.terminal_id, &first_pane.pane_id] {
+        assert!(backend.get_live_pane_info(invalid).is_err());
+        assert!(backend.set_status(invalid, "working", false).is_err());
+        assert!(backend.clear_status(invalid).is_err());
+    }
+    assert!(other.get_live_pane_info(&first).is_err());
+    assert!(other.set_status(&first, "working", false).is_err());
+    assert!(other.clear_status(&first).is_err());
     assert_eq!(
         backend.get_all_session_names()?,
         HashSet::from(["wm-one".into()])
@@ -196,6 +205,8 @@ fn isolated_core_operations() -> Result<()> {
     backend.kill_session("second")?;
     assert!(!backend.session_exists("second")?);
     assert!(backend.get_live_pane_info(&second)?.is_none());
+    assert!(backend.set_status(&second, "working", false).is_err());
+    assert!(backend.clear_status(&second).is_err());
 
     let split = backend.split_pane(
         &middle,
