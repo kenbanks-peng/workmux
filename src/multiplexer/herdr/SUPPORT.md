@@ -148,6 +148,30 @@ output under each private server's artifact directory. Full acknowledgement
 requires a supported way to establish attached-client visibility and focus;
 do not infer it from labels, inherited pane IDs, geometry, or event arrival.
 
+### Session-mode gate: restart recovery is blocked
+
+On 2026-09-15, an experimental add/open support change was tested on private
+macOS Herdr 0.9.0 / protocol 22 servers, then removed. The session-mode restriction
+remains in place. These results are diagnosis, not enabled feature support.
+
+The experiment passed add/open with `--session`, `--mode session`, and configuration
+mode, background creation, foreground open, workspace/tab mapping, close, and
+remove. Ordinary agent-stub registration, working status, and resurrect after
+workspace close also passed without a status workaround.
+
+Same-socket restart failed the session recovery gate. Herdr restored the workspace
+label `wm-feature` with an unknown agent status. `workmux resurrect` returned success
+but printed `skipping (already open)` and `Nothing to restore`; it did not launch a
+fresh agent. In `workflow::resurrect::plan`, session-mode skip detection tests only
+membership in the live session-name set. That is not proof that a restored workspace
+contains a current Workmux agent or has current-lifetime cleanup ownership.
+
+A recovery destination and ownership rule must be resolved before session mode
+can be enabled. Preserve the occupied restored layout. Do not treat its label or
+old workspace ownership file as authority to close it. Multi-window setup, mode
+conversion, rename, merge cleanup, and in-pane navigation were not verified in this
+experiment. The complete lifecycle gate remains open. Linux was not tested.
+
 ### Restore after restart
 
 On 2026-09-15, window-mode restore passed on private macOS servers at the same
