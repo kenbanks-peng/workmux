@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 
+from focus_checks import focus_protocol
 from run import ROOT, env_for
 from server import HerdrServer, wait_until
 
@@ -317,18 +318,29 @@ def status_targets(f):
 
 
 def focus(f):
-    pane = f.add()
-    f.server.attach()
-    for state in ("waiting", "done"):
-        code, output = f.native(pane, f.wm("set-window-status", state))
-        assert code == 0, output
+    # This is a restriction check until protocol 22 can prove UI visibility.
+    # Do not count it as a passing acknowledgement acceptance test.
+    pane, environment = launch_status_agent(f)
+    client = f.server.attach()
+    wait_until(lambda: b"parent" in client.output)
+    f.server.request("pane.focus", pane_id=pane["pane_id"])
+    for state in ("waiting", "done", "working"):
+        f.run("set-window-status", state, env=environment)
+        assert_status(f, pane, state)  # Already-focused updates also remain.
         f.server.request("pane.focus", pane_id=f.parent["pane_id"])
-        f.server.request("pane.focus", pane_id=pane["pane_id"])
+        f.run("open", "feature")
+        wait_until(
+            lambda: (
+                f.server.request("session.snapshot")["snapshot"]["focused_pane_id"]
+                == pane["pane_id"]
+            )
+        )
         time.sleep(0.3)
-        agents = json.loads(f.run("status", "--json").stdout)["agents"]
-        assert agents and agents[0]["status"] == state, agents
+        assert_status(f, pane, state)
     print(
-        "PASS focus limitation: waiting and done remain after focus away/back with attached UI"
+        "BLOCKED focus acknowledgement (restriction check passed): "
+        "waiting/done remain for already-focused updates and after Workmux open; "
+        "working remains; native reports and Workmux tracking agree"
     )
 
 
@@ -776,6 +788,7 @@ CASES = {
     "status": status,
     "status-targets": status_targets,
     "focus": focus,
+    "focus-protocol": focus_protocol,
     "wait": wait,
     "run": run_commands,
     "hooks": hooks,

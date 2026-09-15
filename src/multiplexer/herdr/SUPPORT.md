@@ -52,8 +52,10 @@ This is not full feature parity with tmux:
 
 - The unchanged workflows reject `--session` and session-mode configuration.
 - The unchanged sidebar is tmux-only. No separate Herdr sidebar is installed.
-- No automatic focus acknowledgement runtime is installed. Native status does
-  not automatically clear on focus. Workmux retains its existing agent state.
+- Automatic focus acknowledgement is unsupported. Protocol 22 does not expose
+  the attached-client visibility needed for tmux-equivalent acknowledgement.
+  Native status and Workmux state remain unchanged on focus. See the capability
+  evidence below; no observer is installed.
 - Herdr-specific sandbox identity routing is not verified. Shared agent reaping
   passed with a cooperative stub: dry-run, Ctrl-C exit, and state removal.
   Ctrl-D fallback and unresponsive agents remain unverified.
@@ -101,6 +103,50 @@ Wait releases on done; run retains output, exit status 7, and background output.
 The dashboard renders done and focuses the agent on Enter. Multiple-agent and
 continue/fork stub launches register and report working. These are not real
 agent replay or sandbox checks. Linux was not retested for this change.
+
+### Focus acknowledgement: blocked on protocol 22
+
+On 2026-09-15, private macOS servers verified the following limits on unmodified
+Herdr 0.9.0. These are capability and restriction checks, not feature support:
+
+- `events.subscribe` accepts `pane.focused`, `tab.focused`, and
+  `workspace.focused`. An API `pane.focus` emits all three events even when
+  there is no attached UI. With a UI attached, the same call emits the same
+  payload. The payload contains destination IDs, not client or caller identity.
+- Manual Ctrl-B h/l navigation from two real PTY-backed UI clients changes
+  `session.snapshot` focus fields but produces no focus events during the
+  probe's observation interval. A later API focus confirms the subscription
+  is still live. An event-only observer would miss these manual changes.
+- `SessionSnapshot` exposes `focused_workspace_id`, `focused_tab_id`,
+  `focused_pane_id`, and per-resource `focused` flags. It has no attached-client
+  list/count or per-client focus map. The focus fields remain set after both
+  UI clients detach. Polling these fields cannot prove that a pane is visible
+  to an attached UI. Layout dimensions are not proof of attachment either.
+- Ordinary registered agent updates to an already-focused pane retain waiting
+  (`blocked`) and done (`idle`). Focus away followed by `workmux open feature`
+  also retains them. Working remains working. Native reports and Workmux JSON
+  tracking agree throughout this restriction check.
+
+The tmux reference acknowledges waiting/done immediately when the pane is active
+in an active window in an attached session. It otherwise waits for pane focus.
+Protocol 22's retained server selection is not equivalent to that condition.
+A snapshot poller or focus-event observer would risk clearing an unseen status.
+No partial observer is installed; there are no observer processes to duplicate
+or orphan. Existing endpoint, lifetime, process, and ownership checks are unchanged.
+Newer-status race, move, restart, and observer-lifecycle acceptance checks remain
+blocked, not passed. Linux was not tested for this investigation.
+
+Repeat the evidence checks with:
+
+```sh
+python3 src/multiplexer/herdr/integration/support_checks.py focus-protocol focus
+```
+
+They print `BLOCKED`, not a feature-support claim. Set `WORKMUX_HERDR_LOG_DIR`
+to retain `focus-protocol.json`, API request logs, server logs, and client PTY
+output under each private server's artifact directory. Full acknowledgement
+requires a supported way to establish attached-client visibility and focus;
+do not infer it from labels, inherited pane IDs, geometry, or event arrival.
 
 ### Restore after restart
 
