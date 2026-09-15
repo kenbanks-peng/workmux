@@ -1,7 +1,5 @@
 # Discussion points
 
-- **Capture-output behavior:** The Herdr adapter trims trailing line breaks and returns at most the requested number of lines. The tmux adapter returns its native capture result without that adjustment. Investigate whether this difference affects Workmux behavior and align the output where needed.
-
 - **Native agent status:** The Herdr adapter maps Workmux waiting to Herdr blocked, and Workmux done to Herdr idle. Herdr's protocol has no distinct done state or Workmux icon field; the adapter sends the icon as message text. Workmux retains the exact state in its own state store. Investigate how to preserve the tmux status distinctions in Herdr's native display.
 
 - Investigate functionality differences between Workmux's tmux sidebar and Herdr's native sidebar. Identify confirmed gaps and determine whether the adapter can address them through Herdr's native sidebar.
