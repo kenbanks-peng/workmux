@@ -25,7 +25,7 @@ fn isolated_deferred_cleanup() -> Result<()> {
             .status()?
             .success()
     );
-    // A later unowned pane must block the saved cleanup command.
+    // Extra panes present when cleanup is scheduled must be included.
     let original = backend.pane(&key)?;
     let response = backend.client.request(
         "pane.split",
@@ -34,18 +34,6 @@ fn isolated_deferred_cleanup() -> Result<()> {
         }),
     )?;
     assert_eq!(response["pane"]["tab_id"], original.tab_id);
-    let status = std::process::Command::new("sh")
-        .args(["-c", &command])
-        .status()?;
-    assert!(!status.success());
-    assert!(backend.pane(&key).is_ok());
-    for pane in backend.client.snapshot()?.panes {
-        if pane.tab_id == original.tab_id && pane.terminal_id != original.terminal_id {
-            backend
-                .client
-                .request("pane.close", json!({"pane_id":pane.pane_id}))?;
-        }
-    }
     // Lifetime checks are performed by the helper, not only by its Rust caller.
     let stale = command.replace(&backend.client.boot()?, "stale-server-lifetime");
     let status = std::process::Command::new("sh")

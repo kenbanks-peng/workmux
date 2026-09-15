@@ -241,7 +241,7 @@ def main():
                     )
                     proxy.verify()
                     print(
-                        f"PASS {mode} cleanup preserves {insertion} insertion",
+                        f"PASS {mode} cleanup includes {insertion} insertion",
                         flush=True,
                     )
     with ExitStack() as stack:

@@ -647,8 +647,19 @@ fn isolated_persisted_identity_contract() -> Result<()> {
     let moved = backend.pane(&key)?;
     assert_ne!(moved.pane_id, pane.pane_id);
     assert_eq!(backend.verified_terminal(&moved)?.shell, initial.shell);
-    assert!(backend.kill_window("foreign").is_err());
-    assert!(backend.owned_window_targets("owner-1").is_err());
+    assert!(
+        backend
+            .verified_record(
+                &backend.tab(&WindowTarget::with_id(
+                    "foreign".into(),
+                    None,
+                    backend.key(&native.tab_id)?
+                ))?,
+                &backend.client.snapshot()?,
+            )
+            .is_ok()
+    );
+    assert_eq!(backend.owned_window_targets("owner-1")?.len(), 1);
     // Remove only the fixture's native terminal through its owner (Herdr).
     backend
         .client

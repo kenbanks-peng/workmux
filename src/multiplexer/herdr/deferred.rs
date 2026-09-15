@@ -77,7 +77,9 @@ impl Operation {
             .map(|p| &p.terminal_id)
             .collect();
         ensure!(
-            live == self.terminals.keys().collect(),
+            self.terminals
+                .keys()
+                .all(|terminal| live.contains(terminal)),
             "Herdr target contents changed; refusing deferred close"
         );
         Ok(())
@@ -110,31 +112,24 @@ impl Operation {
             return Ok(());
         }
         ensure!(
-            !self.terminals.is_empty(),
+            self.action.workspace() || !self.terminals.is_empty(),
             "Herdr cleanup target has no owned terminals"
         );
         self.verify_contents(&snapshot)?;
         for pane in snapshot.panes.iter().filter(|p| self.contains(p)) {
-            Self::verify_process(&client, pane, &self.terminals[&pane.terminal_id])?;
-        }
-        self.verify_contents(&client.snapshot()?)?;
-        // Never close a container: foreign panes can arrive after the check.
-        // Native moves change pane IDs, so resolve each captured terminal again.
-        for (terminal, shell) in &self.terminals {
-            if let Some(pane) = client
-                .snapshot()?
-                .panes
-                .iter()
-                .find(|p| &p.terminal_id == terminal)
-            {
+            if let Some(shell) = self.terminals.get(&pane.terminal_id) {
                 Self::verify_process(&client, pane, shell)?;
-                client.request("pane.close", json!({"pane_id": pane.pane_id}))?;
             }
         }
-        ensure!(
-            !self.target_exists(&client.snapshot()?),
-            "Herdr cleanup preserved unexpected occupants; target container remains"
-        );
+        self.verify_contents(&client.snapshot()?)?;
+        // Match tmux: extra panes belong to the target being closed. Never
+        // follow a captured terminal into a different tab or workspace.
+        let (method, params) = if self.action.workspace() {
+            ("workspace.close", json!({"workspace_id": self.target}))
+        } else {
+            ("tab.close", json!({"tab_id": self.target}))
+        };
+        client.request(method, params)?;
         Ok(())
     }
 }

@@ -113,20 +113,23 @@ fn deferred_focus_uses_captured_target() {
 }
 
 #[test]
-fn deferred_close_resolves_moved_terminal_and_never_closes_container() {
+fn deferred_close_includes_extra_panes_and_closes_container() {
     for action in [Action::CloseTab, Action::CloseWorkspace] {
-        let initial = snapshot(json!([pane("old", "terminal")]), true);
+        let initial = snapshot(
+            json!([pane("old", "terminal"), pane("extra", "extra")]),
+            true,
+        );
         let process = json!({"process_info":{"shell_pid":std::process::id()}});
         let (result, requests) = exercise(
             action,
             vec![
                 initial.clone(),
-                process.clone(),
-                initial,
-                snapshot(json!([pane("moved", "terminal")]), true),
                 process,
+                snapshot(
+                    json!([pane("moved", "terminal"), pane("later", "later")]),
+                    true,
+                ),
                 json!({}),
-                snapshot(json!([]), false),
             ],
             false,
             false,
@@ -137,18 +140,23 @@ fn deferred_close_resolves_moved_terminal_and_never_closes_container() {
             .filter(|r| r["method"].as_str().unwrap().ends_with(".close"))
             .collect();
         assert_eq!(closes.len(), 1);
-        assert_eq!(closes[0]["method"], "pane.close");
-        assert_eq!(closes[0]["params"]["pane_id"], "moved");
+        let (method, key, target) = if action.workspace() {
+            ("workspace.close", "workspace_id", "workspace")
+        } else {
+            ("tab.close", "tab_id", "tab")
+        };
+        assert_eq!(closes[0]["method"], method);
+        assert_eq!(closes[0]["params"][key], target);
     }
 }
 
 #[test]
-fn deferred_close_rejects_changed_contents_and_shell_lifetime() {
+fn deferred_close_rejects_missing_owned_terminal_and_stale_shell() {
     let initial = snapshot(json!([pane("owned", "terminal")]), true);
-    let foreign = snapshot(
-        json!([pane("owned", "terminal"), pane("foreign", "foreign")]),
-        true,
-    );
+    let mut moved = pane("moved", "terminal");
+    moved["tab_id"] = json!("another-tab");
+    moved["workspace_id"] = json!("another-workspace");
+    let foreign = snapshot(json!([moved, pane("foreign", "foreign")]), true);
     let process = json!({"process_info":{"shell_pid":std::process::id()}});
     for (responses, stale_shell, expected) in [
         (vec![foreign.clone()], false, "contents changed"),
@@ -166,7 +174,11 @@ fn deferred_close_rejects_changed_contents_and_shell_lifetime() {
     ] {
         let (result, requests) = exercise(Action::CloseTab, responses, false, stale_shell);
         assert!(result.unwrap_err().to_string().contains(expected));
-        assert!(requests.iter().all(|r| r["method"] != "pane.close"));
+        assert!(
+            requests
+                .iter()
+                .all(|r| !r["method"].as_str().unwrap().ends_with(".close"))
+        );
     }
 }
 

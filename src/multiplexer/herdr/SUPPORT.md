@@ -30,12 +30,12 @@ Live layout replacement is not used. Launches read ownership from the live
 destination terminal, not a cached tab record. A replacement retains the primary
 ownership flag; an added split does not inherit that flag.
 
-Immediate and deferred cleanup close only captured, verified terminals with
-`pane.close`. They never close a whole tab or workspace. A foreign pane inserted
-after the ownership check remains alive. If the target container remains,
-cleanup reports a partial-cleanup error. Already closed owned panes are not
-restored. A foreign pane present at the initial check blocks cleanup before any
-pane is closed.
+Immediate and deferred cleanup match tmux: window cleanup uses `tab.close`,
+and session cleanup uses `workspace.close`. All panes in the target close,
+including panes you added and panes inserted after the ownership check.
+Tab cleanup requires a verified Workmux terminal. Workspace cleanup requires
+its Workmux ownership record. Labels alone are not proof of ownership.
+Cleanup does not follow terminals moved outside the target.
 
 Deferred operations use the same workmux executable through the private
 `_herdr-deferred` command. The Rust helper shares the adapter's transport and
@@ -74,9 +74,8 @@ acceptance claim for this adapter.
 The runner also tests six cleanup races: immediate and deferred tab cleanup,
 and immediate and deferred workspace cleanup with insertion into an existing
 or new tab. A protocol proxy inserts a foreign terminal just before the first
-close request. Each case checks that only `pane.close` was sent, the owned
-terminal closed, the foreign shell survived with working input/output, and
-cleanup reported the retained container. A separate probe checks launch
+close request. Each case checks that `tab.close` or `workspace.close` was sent
+and that the target and the inserted terminal were removed. A separate probe checks launch
 ownership after a native move into a tab with stale ownership metadata.
 
 The retained task-06 layout trees, journals, locks, spacing calibration, and

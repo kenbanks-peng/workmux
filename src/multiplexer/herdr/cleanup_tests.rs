@@ -14,6 +14,14 @@ fn isolated_cleanup_race() -> Result<()> {
     })?;
     backend.finish_pane_setup(std::slice::from_ref(&key))?;
     let original = backend.pane(&key)?;
+    // Native panes have no Workmux record but are part of the close target.
+    let extra = backend.client.request(
+        "pane.split",
+        json!({
+            "target_pane_id": original.pane_id, "direction": "right", "focus": false,
+        }),
+    )?;
+    let extra: Pane = serde_json::from_value(extra["pane"].clone())?;
     std::fs::write(cwd.join("arm-cleanup"), "")?;
     if mode.starts_with("deferred") {
         let command = if mode.ends_with("workspace") {
@@ -25,25 +33,25 @@ fn isolated_cleanup_race() -> Result<()> {
             .args(["-c", &command])
             .output()?;
         ensure!(
-            !output.status.success(),
-            "Cleanup must report the retained container"
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
         );
-        ensure!(String::from_utf8_lossy(&output.stderr).contains("preserved unexpected occupants"));
     } else {
         let result = if mode.ends_with("workspace") {
             backend.kill_session("cleanup-race")
         } else {
             backend.kill_window("owned")
         };
-        let error = result.unwrap_err();
-        ensure!(
-            error.to_string().contains("preserved unexpected occupants"),
-            "{error:#}"
-        );
+        result?;
     }
     ensure!(
         backend.pane(&key).is_err(),
         "Captured terminal was not closed"
+    );
+    ensure!(
+        backend.pane(&backend.key(&extra.terminal_id)?).is_err(),
+        "Extra terminal was not closed"
     );
     Ok(())
 }

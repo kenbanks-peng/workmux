@@ -1,4 +1,4 @@
-"""Adapt the retained task-05 close barrier to the adapter-local test runner.
+"""Check container cleanup with a pane inserted at the close barrier.
 
 Insert a real foreign terminal immediately before the first close request.
 The adapter sees a stable proxy endpoint; all mutations reach a private server.
@@ -112,27 +112,15 @@ class CleanupProxy:
         assert not self.errors, self.errors
 
     def verify(self):
-        assert self.methods and set(self.methods) == {"pane.close"}, self.methods
+        assert self.methods in (["tab.close"], ["workspace.close"]), self.methods
         state = self.server.request("session.snapshot")["snapshot"]
-        pane = next(
-            p for p in state["panes"] if p["terminal_id"] == self.foreign["terminal_id"]
+        assert not any(
+            p["terminal_id"] == self.foreign["terminal_id"] for p in state["panes"]
         )
-        process = self.server.request("pane.process_info", pane_id=pane["pane_id"])
-        assert process["process_info"]["shell_pid"] == self.shell_pid
-        # Verify input and output still work, not only that a snapshot row remains.
-        self.server.request(
-            "pane.send_input",
-            pane_id=pane["pane_id"],
-            text="printf 'FOREIGN-%s\\n' ALIVE",
-            keys=["enter"],
-        )
-        from server import wait_until
-
-        wait_until(
-            lambda: (
-                "FOREIGN-ALIVE"
-                in self.server.request(
-                    "pane.read", pane_id=pane["pane_id"], source="recent"
-                )["read"]["text"]
+        if self.methods == ["tab.close"]:
+            assert not any(t["tab_id"] == self.foreign["tab_id"] for t in state["tabs"])
+        else:
+            assert not any(
+                w["workspace_id"] == self.foreign["workspace_id"]
+                for w in state["workspaces"]
             )
-        )

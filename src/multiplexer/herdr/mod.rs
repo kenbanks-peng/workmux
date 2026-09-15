@@ -384,13 +384,11 @@ impl HerdrBackend {
         ensure!(!panes.is_empty(), "Herdr tab has no live terminals");
         let mut records = Vec::new();
         for pane in &panes {
-            records.push(self.verified_terminal(pane)?);
+            if self.terminal_record(&pane.terminal_id)?.is_some() {
+                records.push(self.verified_terminal(pane)?);
+            }
         }
-        let first = &records[0];
-        ensure!(
-            records.iter().all(|r| r.token == first.token),
-            "Herdr tab contains different owners; refusing cleanup"
-        );
+        let first = records.first().context("Refusing an unowned Herdr tab")?;
         Ok(Ownership {
             boot: self.client.boot()?,
             tab_id: tab.tab_id.clone(),
@@ -399,55 +397,6 @@ impl HerdrBackend {
             terminals: panes.iter().map(|p| p.terminal_id.clone()).collect(),
         })
     }
-    /// Close captured terminals, not a container's future occupants.
-    fn close_captured_tabs(
-        &self,
-        snapshot: &Snapshot,
-        tabs: &HashSet<String>,
-        workspace: Option<&str>,
-    ) -> Result<()> {
-        for tab in snapshot
-            .tabs
-            .iter()
-            .filter(|tab| tabs.contains(&tab.tab_id))
-        {
-            self.verified_record(tab, snapshot)?;
-        }
-        let captured = snapshot
-            .panes
-            .iter()
-            .filter(|pane| tabs.contains(&pane.tab_id))
-            .map(|pane| Ok((pane.terminal_id.clone(), self.verified_terminal(pane)?)))
-            .collect::<Result<Vec<_>>>()?;
-        ensure!(
-            !captured.is_empty(),
-            "Herdr cleanup has no verified terminals"
-        );
-        for (terminal, record) in captured {
-            let current = self.client.snapshot()?;
-            if let Some(pane) = current
-                .panes
-                .iter()
-                .find(|pane| pane.terminal_id == terminal)
-            {
-                ensure!(
-                    self.verified_terminal(pane)? == record,
-                    "Herdr cleanup terminal ownership changed"
-                );
-                self.client
-                    .request("pane.close", json!({"pane_id":pane.pane_id}))?;
-            }
-        }
-        let remaining = self.client.snapshot()?;
-        ensure!(
-            !remaining.tabs.iter().any(|tab| tabs.contains(&tab.tab_id))
-                && workspace
-                    .is_none_or(|id| !remaining.workspaces.iter().any(|w| w.workspace_id == id)),
-            "Herdr cleanup preserved unexpected occupants; target container remains"
-        );
-        Ok(())
-    }
-
     fn launch(&self, shell: &str) -> Result<Arc<pane_launch::Launch>> {
         let mut directory = self.launch_directory.lock().unwrap();
         if directory.is_none() {
@@ -628,20 +577,24 @@ impl HerdrBackend {
                     tab.tab_id == target
                 }
             }) {
-                self.verified_record(tab, &snapshot)?;
+                if !workspace {
+                    self.verified_record(tab, &snapshot)?;
+                }
                 for pane in snapshot
                     .panes
                     .iter()
                     .filter(|pane| pane.tab_id == tab.tab_id)
                 {
-                    terminals.insert(
-                        pane.terminal_id.clone(),
-                        self.verified_terminal(pane)?.shell,
-                    );
+                    if self.terminal_record(&pane.terminal_id)?.is_some() {
+                        terminals.insert(
+                            pane.terminal_id.clone(),
+                            self.verified_terminal(pane)?.shell,
+                        );
+                    }
                 }
             }
             ensure!(
-                !terminals.is_empty(),
+                workspace || !terminals.is_empty(),
                 "Herdr cleanup target has no owned terminals"
             );
             if workspace {
@@ -997,21 +950,19 @@ impl Multiplexer for HerdrBackend {
                 == Some(&self.client.boot()?),
             "Refusing to close an unowned Herdr workspace"
         );
-        let s = self.client.snapshot()?;
-        let tabs = s
-            .tabs
-            .iter()
-            .filter(|t| t.workspace_id == w.workspace_id)
-            .map(|t| t.tab_id.clone())
-            .collect();
-        self.close_captured_tabs(&s, &tabs, Some(&w.workspace_id))
+        self.client
+            .request("workspace.close", json!({"workspace_id": w.workspace_id}))?;
+        Ok(())
     }
     fn kill_window(&self, name: &str) -> Result<()> {
         self.kill_window_target(&WindowTarget::new(name.into(), None))
     }
     fn kill_window_target(&self, target: &WindowTarget) -> Result<()> {
         let tab = self.tab(target)?;
-        self.close_captured_tabs(&self.client.snapshot()?, &HashSet::from([tab.tab_id]), None)
+        self.verified_record(&tab, &self.client.snapshot()?)?;
+        self.client
+            .request("tab.close", json!({"tab_id": tab.tab_id}))?;
+        Ok(())
     }
     fn rename_window(&self, old: &str, new: &str) -> Result<()> {
         let tab = self.tab(&WindowTarget::new(old.into(), None))?;
