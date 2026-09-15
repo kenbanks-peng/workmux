@@ -1,6 +1,59 @@
-//! The Python fixture supplies private servers and invokes these probes alone.
+//! The Python fixture supplies private servers for the ignored probes.
 //! An ordinary cargo test run does not establish real-server acceptance.
 use super::*;
+
+#[test]
+fn create_window_in_session_rejects_missing_and_ambiguous_parents_before_allocation() -> Result<()>
+{
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    for (workspaces, expected) in [
+        (json!([]), "Herdr workspace 'parent' is missing"),
+        (
+            json!([
+                {"workspace_id":"w1", "label":"parent"},
+                {"workspace_id":"w2", "label":"parent"},
+            ]),
+            "Herdr workspace 'parent' is ambiguous (2 matches)",
+        ),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let endpoint = directory.path().join("api.sock");
+        let listener = UnixListener::bind(&endpoint)?;
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut request)
+                .unwrap();
+            writeln!(
+                stream,
+                "{}",
+                json!({"id":"workmux", "result":{"snapshot": {
+                    "version":"0.9.0", "protocol":22, "workspaces":workspaces,
+                    "tabs":[], "panes":[],
+                }}})
+            )
+            .unwrap();
+            serde_json::from_str::<Value>(&request).unwrap()
+        });
+        let backend = HerdrBackend::for_socket(endpoint.to_str().unwrap());
+        let error = backend
+            .create_window_in_session(CreateWindowInSessionParams {
+                session_name: "parent",
+                name: Some("must-not-exist"),
+                cwd: directory.path(),
+            })
+            .unwrap_err();
+        assert!(format!("{error:#}").contains(expected), "{error:#}");
+        assert_eq!(server.join().unwrap()["method"], "session.snapshot");
+    }
+    Ok(())
+}
 
 #[test]
 #[ignore = "requires an isolated Herdr 0.9.0 server; use integration/run.py"]
@@ -301,8 +354,22 @@ fn isolated_server_replacement() -> Result<()> {
         return Ok(());
     };
     let backend = HerdrBackend::for_socket(&endpoint);
-    let pane = backend.client.snapshot()?.panes.remove(0);
-    let old_key = backend.key(&pane.terminal_id)?;
+    let cwd = std::env::current_dir()?;
+    let old_key = backend.create_session(CreateSessionParams {
+        prefix: "",
+        name: "old-parent",
+        cwd: &cwd,
+        initial_window_name: Some("old-tab"),
+    })?;
+    backend.set_window_ownership(&old_key, "recovery-token", true)?;
+    backend.finish_pane_setup(std::slice::from_ref(&old_key))?;
+    let old_pane = backend.pane(&old_key)?;
+    let old_tab = backend.key(&old_pane.tab_id)?;
+    let old_workspace = backend.key(&old_pane.workspace_id)?;
+    let cleanup = [
+        backend.shell_close_window_by_id_guard_cmd(&old_tab)?,
+        backend.shell_close_session_by_id_guard_cmd(&old_workspace, None)?,
+    ];
     std::fs::write("restart-ready", "ready")?;
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while !Path::new("restart-continue").exists() {
@@ -322,7 +389,63 @@ fn isolated_server_replacement() -> Result<()> {
     );
     let fresh = HerdrBackend::for_socket(&endpoint);
     assert!(fresh.select_pane(&old_key).is_err());
+    assert!(fresh.kill_pane(&old_key).is_err());
     assert!(backend.server_boot_id().is_err());
+    assert!(fresh.owned_window_targets("recovery-token")?.is_empty());
+    // Native restored layouts and labels do not inherit Workmux ownership.
+    assert!(fresh.kill_session("old-parent").is_err());
+    assert!(fresh.kill_window("old-tab").is_err());
+    let before = fresh.client.snapshot()?;
+    for parent in ["missing-parent", &old_workspace] {
+        let error = fresh
+            .create_window_in_session(CreateWindowInSessionParams {
+                session_name: parent,
+                name: Some("must-not-exist"),
+                cwd: &cwd,
+            })
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains(if parent == "missing-parent" {
+                "Herdr workspace 'missing-parent' is missing"
+            } else {
+                "Stale Herdr workspace identity"
+            }),
+            "{error:#}"
+        );
+    }
+    assert_eq!(fresh.client.snapshot()?.tabs.len(), before.tabs.len());
+    let replacement = fresh.create_session(CreateSessionParams {
+        prefix: "",
+        name: "replacement",
+        cwd: &cwd,
+        initial_window_name: None,
+    })?;
+    fresh.finish_pane_setup(std::slice::from_ref(&replacement))?;
+    let new_key = fresh.create_window_in_session(CreateWindowInSessionParams {
+        session_name: "replacement",
+        name: Some("restored"),
+        cwd: &cwd,
+    })?;
+    fresh.set_window_ownership(&new_key, "recovery-token", true)?;
+    fresh.finish_pane_setup(std::slice::from_ref(&new_key))?;
+    assert_ne!(
+        old_key.split_once('~').unwrap().0,
+        new_key.split_once('~').unwrap().0
+    );
+    assert_eq!(fresh.owned_window_targets("recovery-token")?.len(), 1);
+    let before_cleanup = fresh.client.snapshot()?;
+    for command in cleanup {
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("server lifetime changed"));
+    }
+    assert_eq!(
+        fresh.client.snapshot()?.panes.len(),
+        before_cleanup.panes.len()
+    );
+    assert!(fresh.pane(&new_key).is_ok());
     println!("HERDR_REPLACEMENT_REFUSAL_PASSED");
     Ok(())
 }

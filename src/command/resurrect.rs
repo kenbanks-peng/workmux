@@ -112,10 +112,10 @@ pub fn run(dry_run: bool) -> Result<()> {
             Err(e) => {
                 info!(
                     handle = candidate.handle,
-                    error = %e,
+                    error = %format!("{e:#}"),
                     "resurrect:exec failed to restore"
                 );
-                eprintln!("  Failed to restore '{}': {}", candidate.handle, e);
+                eprintln!("  Failed to restore '{}': {e:#}", candidate.handle);
                 failed.push(candidate.handle.clone());
             }
         }

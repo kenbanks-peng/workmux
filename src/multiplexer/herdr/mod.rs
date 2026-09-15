@@ -159,9 +159,11 @@ impl HerdrBackend {
             .into_iter()
             .filter(|w| id.is_some_and(|id| w.workspace_id == id) || w.label == name)
             .collect();
+        ensure!(!matches.is_empty(), "Herdr workspace '{name}' is missing");
         ensure!(
             matches.len() == 1,
-            "Herdr workspace '{name}' is missing or ambiguous"
+            "Herdr workspace '{name}' is ambiguous ({} matches); use a unique workspace name",
+            matches.len()
         );
         Ok(matches.into_iter().next().unwrap())
     }

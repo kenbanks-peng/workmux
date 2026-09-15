@@ -109,6 +109,55 @@ def caller_probe(binary, server):
     print("PASS native caller resolution and window placement", flush=True)
 
 
+def restart_probe(binary, server):
+    output = server.root / "restart-output"
+    with (
+        output.open("w") as log,
+        subprocess.Popen(
+            [
+                str(binary),
+                "--exact",
+                "multiplexer::herdr::tests::isolated_server_replacement",
+                "--ignored",
+                "--nocapture",
+            ],
+            env={
+                **env_for(server),
+                "WORKMUX_HERDR_RESTART_SOCKET": str(server.socket_path),
+            },
+            cwd=server.root,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        ) as process,
+    ):
+        try:
+            wait_until(
+                lambda: (
+                    (server.root / "restart-ready").exists()
+                    or process.poll() is not None
+                )
+            )
+            assert process.poll() is None, output.read_text()
+            server.stop()
+            server.start()
+            (server.root / "restart-continue").touch()
+            assert process.wait(timeout=45) == 0, output.read_text()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            if server.artifact_dir:
+                server.artifact_dir.mkdir(parents=True, exist_ok=True)
+                (server.artifact_dir / "restart-output.log").write_text(
+                    output.read_text()
+                )
+    assert "HERDR_REPLACEMENT_REFUSAL_PASSED" in output.read_text(), output.read_text()
+    print(
+        "PASS restart: missing/stale parents, fresh ownership, and old tab/workspace cleanup refusal",
+        flush=True,
+    )
+
+
 def cli_smoke(server):
     binary = ROOT / "target/debug/workmux"
     repo = server.root / "repo"
@@ -244,6 +293,8 @@ def main():
                         f"PASS {mode} cleanup includes {insertion} insertion",
                         flush=True,
                     )
+    with ExitStack() as stack:
+        restart_probe(binary, own(stack))
     with ExitStack() as stack:
         caller_probe(binary, own(stack))
     with ExitStack() as stack:

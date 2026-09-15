@@ -561,31 +561,136 @@ def navigation(f):
     )
 
 
+def recovery_files(f):
+    state = Path(f.env["XDG_STATE_HOME"]) / "workmux"
+    return {
+        path: path.read_bytes()
+        for directory in ("agents", "agent-recovery")
+        for path in (state / directory).rglob("*.json")
+    }
+
+
 def resurrect(f):
+    pane, environment = launch_status_agent(f)
+    # Resolve the recorded agent kind to the private stub on later restores.
+    f.config(
+        {
+            "agent": str(f.server.root / "claude"),
+            "agents": {"claude": str(f.server.root / "claude")},
+            "panes": [{"command": "<agent>"}],
+        }
+    )
+    ready = f.server.root / "feature-environment.json"
+    original_key = environment["WORKMUX_STATUS_PANE_ID"]
+    f.server.request("tab.close", tab_id=pane["tab_id"])
+    ready.unlink()
+    result = f.run("resurrect", "--dry-run")
+    assert "would restore 1" in result.stdout, result
+    assert "Restored 1" in f.run("resurrect").stdout
+    wait_until(lambda: ready.exists() and ready.read_text())
+    old_key = json.loads(ready.read_text())["WORKMUX_STATUS_PANE_ID"]
+    assert old_key != original_key
+    print("PASS resurrect: closed tab restored from ordinary agent registration")
+
+    f.server.stop()
+    restarted = f.server.start()["snapshot"]
+    # Herdr restores workspace labels. The original probe made two parents.
+    parents = [w for w in restarted["workspaces"] if w["label"] == "parent"]
+    assert len(parents) == 1, restarted
+    replacement = f.server.request(
+        "workspace.create", label="parent", cwd=str(f.repo), focus=True
+    )["root_pane"]
+    before = f.server.request("session.snapshot")["snapshot"]
+    recovery = recovery_files(f)
+    assert recovery
+    result = f.run("resurrect", ok=False)
+    print(result.stdout + result.stderr, flush=True)
+    assert result.returncode != 0, result
+    assert "Failed to create window in session" in result.stderr, result
+    assert "Herdr workspace 'parent' is ambiguous (2 matches)" in result.stderr, result
+    after = f.server.request("session.snapshot")["snapshot"]
+    assert after["tabs"] == before["tabs"]
+    assert recovery_files(f) == recovery
+    assert "would restore 1" in f.run("resurrect", "--dry-run").stdout
+    # Keep the native restored layout: the replacement is only a destination.
+    f.server.request(
+        "workspace.rename", workspace_id=parents[0]["workspace_id"], label="retained"
+    )
+    ready.unlink()
+    assert "Restored 1" in f.run("resurrect").stdout
+    wait_until(lambda: ready.exists() and ready.read_text())
+    new_environment = json.loads(ready.read_text())
+    new_key = new_environment["WORKMUX_STATUS_PANE_ID"]
+    assert new_key.split("~", 1)[0] != old_key.split("~", 1)[0]
+    snapshot = f.server.request("session.snapshot")["snapshot"]
+    pane = next(
+        p for p in snapshot["panes"] if new_key.endswith("~" + p["terminal_id"])
+    )
+    assert pane["workspace_id"] == replacement["workspace_id"], snapshot
+    assert pane["terminal_id"] not in {p["terminal_id"] for p in restarted["panes"]}
+    assert {p["terminal_id"] for p in restarted["panes"]} <= {
+        p["terminal_id"] for p in snapshot["panes"]
+    }, snapshot
+    assert all(old_key.encode() not in data for data in recovery_files(f).values())
+    for _ in range(2):
+        result = f.run("resurrect")
+        assert (
+            "skipping (already open)" in result.stdout
+            and "Nothing to restore" in result.stdout
+        )
+        assert (
+            f.server.request("session.snapshot")["snapshot"]["tabs"] == snapshot["tabs"]
+        )
+    f.run("set-window-status", "working", env=new_environment)
+    assert_status(f, pane, "working")
+    print(
+        "PASS restart: unique replacement parent, fresh identity, retained native panes, repeat restore, and status"
+    )
+
+
+def resurrect_failure(f):
     pane = f.add()
     code, output = f.native(pane, f.wm("set-window-status", "done"))
     assert code == 0, output
     f.server.request("tab.close", tab_id=pane["tab_id"])
-    result = f.run("resurrect", "--dry-run")
-    assert "would restore 1" in result.stdout, result
-    result = f.run("resurrect")
-    assert "Restored 1" in result.stdout, result
-    print("PASS resurrect: native tab loss restored from tracked state")
-    # Re-register because restore consumes the original recovery entry.
-    snapshot = f.server.request("session.snapshot")["snapshot"]
-    tab = next(t for t in snapshot["tabs"] if t["label"] == "wm-feature")
-    pane = next(p for p in snapshot["panes"] if p["tab_id"] == tab["tab_id"])
-    code, output = f.native(pane, f.wm("set-window-status", "done"))
-    assert code == 0, output
-    f.server.stop()
-    f.server.start()
-    f.server.request("workspace.create", label="parent", cwd=str(f.repo), focus=True)
+    recovery = recovery_files(f)
+    assert recovery
+    # Fail after allocation: Herdr cannot preserve a split outside 10--90%.
+    f.config({"panes": [{}, {"split": "horizontal", "percentage": 5}]})
     result = f.run("resurrect", ok=False)
-    assert (
-        result.returncode != 0 and "Failed to create window in session" in result.stderr
-    ), result
+    assert result.returncode != 0 and "Failed to setup panes" in result.stderr, result
+    assert "limits each split to 10–90%" in result.stderr, result
+    assert recovery_files(f) == recovery
+    # As with normal setup, a partial layout can retain a usable shell. Repeat
+    # restore must not overwrite it or consume the failed attempt's recovery.
+    partial = f.server.request("session.snapshot")["snapshot"]
+    assert any(t["label"] == "wm-feature" for t in partial["tabs"])
+    assert "skipping (already open)" in f.run("resurrect").stdout
+    assert recovery_files(f) == recovery
+    assert f.server.request("session.snapshot")["snapshot"]["tabs"] == partial["tabs"]
+    f.run("close", "feature")
+    assert recovery_files(f) == recovery
+    assert "would restore 1" in f.run("resurrect", "--dry-run").stdout
+    # The shared setup contract creates a missing named parent. It does not
+    # choose the focused workspace. Preserve the existing fixture workspace.
+    f.server.request(
+        "workspace.rename", workspace_id=f.parent["workspace_id"], label="retained"
+    )
+    f.config({"panes": [{}]})
+    assert "Restored 1" in f.run("resurrect").stdout
+    snapshot = f.server.request("session.snapshot")["snapshot"]
+    parent = next(w for w in snapshot["workspaces"] if w["label"] == "parent")
+    assert parent["workspace_id"] != f.parent["workspace_id"]
+    assert any(
+        t["label"] == "wm-feature" and t["workspace_id"] == parent["workspace_id"]
+        for t in snapshot["tabs"]
+    )
+    assert any(p["terminal_id"] == f.parent["terminal_id"] for p in snapshot["panes"])
+    assert all(
+        pane["terminal_id"].encode() not in data for data in recovery_files(f).values()
+    )
     print(
-        "PASS restart limitation: resurrect fails after stop/start despite replacement parent workspace"
+        "PASS resurrect failure: partial layout is not replaced, recovery retained, close and retry creates missing named parent"
     )
 
 
@@ -679,6 +784,7 @@ CASES = {
     "dashboard": dashboard,
     "navigation": navigation,
     "resurrect": resurrect,
+    "resurrect-failure": resurrect_failure,
     "reap": reap,
     "popup": popup,
 }
