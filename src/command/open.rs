@@ -47,8 +47,8 @@ pub fn run(
     if resolved_names.len() > 1 && prompt_args.has_any() {
         bail!("Prompt arguments (-p, -P, -e) cannot be used when opening multiple worktrees");
     }
-    if resolved_names.len() > 1 && (target_name.is_some() || parent_session.is_some()) {
-        bail!("--target-name and --parent-session cannot be used when opening multiple worktrees");
+    if resolved_names.len() > 1 && target_name.is_some() {
+        bail!("--target-name cannot be used when opening multiple worktrees");
     }
 
     let target_name = target_name

@@ -20,8 +20,10 @@ All platform code and integration tests are in this directory. Shared changes
 cover backend registration, two multiplexer launch lifecycle hooks, and the
 explicit status-target allowlist. The allowlist accepts Herdr; the adapter still
 validates the endpoint and server-lifetime-qualified terminal identity. The shared
-resurrect command also prints the full error chain for failed worktrees. Workflow,
-state, sandbox, sidebar, and other backend files are unchanged. These constraints
+resurrect command also prints the full error chain for failed worktrees. Shared
+add/open checks allow an explicit parent for multiple worktrees while retaining
+the single-target name restriction. Workflow, state, sandbox, sidebar, and other
+backend files are unchanged. These constraints
 supersede the earlier shared-interface design in `docs/design/herdr-support.md`
 for this implementation.
 
@@ -103,6 +105,38 @@ Wait releases on done; run retains output, exit status 7, and background output.
 The dashboard renders done and focuses the agent on Enter. Multiple-agent and
 continue/fork stub launches register and report working. These are not real
 agent replay or sandbox checks. Linux was not retested for this change.
+
+### Explicit parents for multiple worktrees
+
+On 2026-09-15, private macOS Herdr 0.9.0 / protocol 22 servers verified external
+window-mode `add --parent-session parent` with `--count`, multiple `--agent`
+options, `--foreach`, stdin lines, and prompt frontmatter generation. Each tab
+used the requested workspace, not the focused workspace. Names were distinct,
+background creation retained focus, and ordinary agent stubs registered and
+reported working in Workmux state and native reports without a status workaround.
+
+Multi-worktree `open --parent-session parent` also passed, including foreground
+focus, repeated names, and `--new` suffixes. A missing worktree did not prevent
+later names from opening. Duplicate parent labels failed before tab allocation
+for both add and open. An inherited pane ID did not permit implicit external
+creation. A user tab with a generated name was retained; creation used the normal
+repository suffix. Duplicate generated names failed rather than sharing a target.
+
+A split-size failure during the second add retained the first and partial second
+layouts in the explicit parent and stopped before the third worktree. Cleanup of
+the owned targets retained all user panes. There is no new rollback behavior.
+Shared tmux tests also verify parent propagation and unchanged target-name, name,
+count/agent, stdin/foreach, headless, prompt, parent-name, and session-mode checks.
+
+Repeat the focused probes with:
+
+```sh
+python3 src/multiplexer/herdr/integration/support_checks.py multi multi-generation multi-open multi-failure
+```
+
+Session-mode variants remain blocked by the session recovery gate below (#6).
+This change enables window mode only. Linux and real agent replay were not tested.
+Popup-script caller identity and focus acknowledgement restrictions are unchanged.
 
 ### Focus acknowledgement: blocked on protocol 22
 
