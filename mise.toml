@@ -1,3 +1,11 @@
 [tasks.build]
 description = "Build workmux for production"
 run = "cargo build --release --locked --bin workmux"
+
+[tasks.deploy]
+description = "Build and copy workmux to bin"
+depends = ["build"]
+run = """
+mkdir -p bin
+cp target/release/workmux bin/workmux
+"""
