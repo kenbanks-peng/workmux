@@ -620,9 +620,9 @@ pub fn run(
              Use the default naming or set worktree_naming/worktree_prefix in config instead."
         ));
     }
-    if target_name.is_some() && has_multi_worktree {
+    if (target_name.is_some() || parent_session.is_some()) && has_multi_worktree {
         return Err(anyhow!(
-            "--target-name cannot be used with multi-worktree generation (multiple --agent, --count, --foreach, or stdin)."
+            "--target-name and --parent-session cannot be used with multi-worktree generation (multiple --agent, --count, --foreach, or stdin)."
         ));
     }
 

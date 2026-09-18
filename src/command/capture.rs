@@ -15,8 +15,9 @@ pub fn run(name: &str, lines: u16) -> Result<()> {
     // Strip ANSI escape codes
     let stripped = strip_ansi_codes(&output);
 
-    // Remove blank lines after stripping ANSI, including whitespace-only rows.
-    // Keep the CLI line limit as a final output guard.
+    // Trim trailing blank lines and limit to requested line count.
+    // tmux capture-pane may return more lines than requested (it captures
+    // from -N to the bottom of the visible pane area).
     let trimmed: Vec<&str> = stripped
         .lines()
         .collect::<Vec<_>>()
