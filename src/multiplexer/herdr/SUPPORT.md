@@ -16,16 +16,14 @@ WORKMUX_BACKEND=herdr HERDR_SOCKET_PATH=/absolute/path/herdr.sock \
 
 ## Implementation boundary
 
-All platform code and integration tests are in this directory. Shared changes
-cover backend registration, two multiplexer launch lifecycle hooks, and the
-explicit status-target allowlist. The allowlist accepts Herdr; the adapter still
-validates the endpoint and server-lifetime-qualified terminal identity. The shared
-resurrect command also prints the full error chain for failed worktrees. Shared
-add/open checks allow an explicit parent for multiple worktrees while retaining
-the single-target name restriction. Workflow, state, sandbox, sidebar, and other
-backend files are unchanged. These constraints
-supersede the earlier shared-interface design in `docs/design/herdr-support.md`
-for this implementation.
+All Herdr platform code and integration tests are in this directory. The deferred
+worker requires no shared command dispatch. `src/cli.rs` and `src/command/` match
+main. Shared backend registration, multiplexer launch lifecycle hooks, and capture
+changes remain outside this directory; this is not yet full folder isolation.
+The restored command checks reject Herdr status targets and explicit parents for
+multiple worktrees. Earlier status and multi-worktree results below are historical,
+not current support claims. These constraints supersede the earlier shared-interface
+design in `docs/design/herdr-support.md` for this implementation.
 
 The adapter supplies tab creation and placement, pane splits, controlled command
 launch, input, capture, focus, zoom, names, ownership checks, native agent reports,
@@ -42,11 +40,20 @@ Tab cleanup requires a verified Workmux terminal. Workspace cleanup requires
 its Workmux ownership record. Labels alone are not proof of ownership.
 Cleanup does not follow terminals moved outside the target.
 
-Deferred operations use the same workmux executable through the private
-`_herdr-deferred` command. The Rust helper shares the adapter's transport and
-process identity checks. It checks the captured server lifetime on each connection
-and terminal identities before cleanup. Scheduled cleanup runs in a detached
-process, not a thread that dies with the caller. Python is not required at runtime.
+Deferred operations use `deferred_worker.py`, embedded in the workmux executable.
+Python 3 must be on PATH when a command is prepared. Workmux captures its absolute
+path and runs the embedded source in isolated mode (`-I`); no helper installation,
+project imports, or workmux configuration is needed. Missing Python fails command
+preparation. Scheduled cleanup runs in a detached process, not a thread that dies
+with the caller. No private workmux command or startup interception is used.
+
+The worker checks the captured server lifetime on every connection before sending
+bytes, validates protocol 22, and checks terminal process identities before cleanup.
+Requests have an eight-second deadline and an 8 MiB response limit. Mutations are
+not retried. Its identity formats must remain aligned with `client.rs` and
+`identity.rs`; Rust tests execute the actual embedded worker against a private
+socket to check that agreement. This duplicates a small transport and identity
+implementation in exchange for keeping worker startup within the Herdr folder.
 
 ## Core restrictions
 
@@ -79,6 +86,13 @@ paths, then stops those servers. It requires Herdr 0.9.0 and Python 3. Live Rust
 probes are explicitly ignored in ordinary unit runs; they are not counted as
 passed without a private server. The earlier full-feature matrix is not an
 acceptance claim for this adapter.
+
+After the worker redesign, `cargo test` passed with 1745 tests passed and 18
+ignored on macOS. The worker tests cover focus, close, stale server/process
+identities, moved terminals, malformed input, shell quoting, Python import
+isolation, and completion after the scheduling process exits. Python lint also
+passed. Live-server verification was blocked because the installed Herdr client
+is 0.9.1, not the required 0.9.0. Linux was not tested for this redesign.
 
 The runner also tests six cleanup races: immediate and deferred tab cleanup,
 and immediate and deferred workspace cleanup with insertion into an existing

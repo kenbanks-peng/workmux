@@ -57,15 +57,6 @@ impl Client {
         }
     }
 
-    /// Use the identity captured by the scheduling process. The worker must
-    /// call snapshot first to validate the protocol without adopting a new peer.
-    pub(super) fn for_lifetime(endpoint: String, boot: String) -> Self {
-        Self {
-            endpoint,
-            boot: Mutex::new(Some(boot)),
-        }
-    }
-
     pub fn request(&self, method: &str, params: Value) -> Result<Value> {
         let mut boot = self
             .boot

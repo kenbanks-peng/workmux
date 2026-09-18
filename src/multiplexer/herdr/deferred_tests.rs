@@ -15,8 +15,8 @@ fn isolated_deferred_cleanup() -> Result<()> {
     backend.finish_pane_setup(std::slice::from_ref(&key))?;
     let tab = backend.key(&backend.pane(&key)?.tab_id)?;
     let command = backend.shell_close_window_by_id_guard_cmd(&tab)?;
-    assert!(command.contains(" _herdr-deferred "));
-    // The absolute workmux executable needs no interpreter on PATH.
+    assert!(!command.contains("_herdr-deferred"));
+    // The interpreter was resolved before PATH changed. No workmux dispatch.
     let focus = backend.shell_select_window_cmd("owned")?;
     assert!(
         std::process::Command::new("/bin/sh")

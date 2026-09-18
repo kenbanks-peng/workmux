@@ -29,6 +29,18 @@ fn exercise(
     stale_boot: bool,
     stale_shell: bool,
 ) -> (anyhow::Result<()>, Vec<Value>) {
+    exercise_with_runner(action, responses, stale_boot, stale_shell, |operation| {
+        run(&serde_json::to_string(operation).unwrap())
+    })
+}
+
+fn exercise_with_runner(
+    action: Action,
+    responses: Vec<Value>,
+    stale_boot: bool,
+    stale_shell: bool,
+    runner: impl FnOnce(&Operation) -> anyhow::Result<()>,
+) -> (anyhow::Result<()>, Vec<Value>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("api.sock");
     let listener = UnixListener::bind(&path).unwrap();
@@ -88,8 +100,53 @@ fn exercise(
         .into(),
         terminals: [("terminal".into(), shell)].into(),
     };
-    let result = run(&serde_json::to_string(&operation).unwrap());
+    let result = runner(&operation);
     (result, server.join().unwrap())
+}
+
+// Invoked as a separate test process by deferred_worker_outlives_scheduler.
+#[test]
+fn deferred_scheduler_process() {
+    if let Ok(script) = std::env::var("WORKMUX_HERDR_TEST_DEFERRED_SCRIPT") {
+        super::util::run_detached_sh_c(&script).unwrap();
+    }
+}
+
+#[test]
+fn deferred_worker_outlives_scheduler() {
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("scheduler-exited");
+    let (result, requests) = exercise_with_runner(
+        Action::CloseTab,
+        vec![
+            snapshot(json!([pane("owned", "terminal")]), true),
+            json!({"process_info":{"shell_pid":std::process::id()}}),
+            snapshot(json!([pane("owned", "terminal")]), true),
+            json!({}),
+        ],
+        false,
+        false,
+        |operation| {
+            // A marker holds the worker until the scheduling process has exited.
+            let script = format!(
+                "n=0; while [ ! -f {} ]; do [ \"$n\" -lt 500 ] || exit 1; n=$((n + 1)); /bin/sleep 0.01; done; {}",
+                super::agent::shell_quote(marker.to_str().unwrap()),
+                operation.command()?,
+            );
+            let output = std::process::Command::new(std::env::current_exe()?)
+                .args([
+                    "--exact",
+                    "multiplexer::herdr::deferred_unit_tests::deferred_scheduler_process",
+                ])
+                .env("WORKMUX_HERDR_TEST_DEFERRED_SCRIPT", script)
+                .output()?;
+            anyhow::ensure!(output.status.success(), "Scheduler failed: {output:?}");
+            std::fs::write(&marker, "exited")?;
+            Ok(())
+        },
+    );
+    result.unwrap();
+    assert_eq!(requests.last().unwrap()["method"], "tab.close");
 }
 
 #[test]
@@ -192,6 +249,21 @@ fn deferred_worker_rejects_stale_server_before_sending_bytes() {
             .contains("server lifetime changed")
     );
     assert_eq!(requests[1], Value::Null);
+}
+
+#[test]
+fn deferred_worker_rejects_missing_target_and_malformed_snapshot() {
+    let mut malformed = snapshot(json!([]), true);
+    malformed["snapshot"]["panes"] = json!(null);
+    for (response, expected) in [
+        (snapshot(json!([]), false), "target no longer exists"),
+        (malformed, "Malformed Herdr snapshot"),
+    ] {
+        let (result, requests) = exercise(Action::FocusTab, vec![response], false, false);
+        assert!(result.unwrap_err().to_string().contains(expected));
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1]["method"], "session.snapshot");
+    }
 }
 
 #[test]

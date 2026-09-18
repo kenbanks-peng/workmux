@@ -2,7 +2,6 @@
 //! Public focus is native broadcast focus. No implicit endpoint or last-focus fallback.
 mod client;
 mod deferred;
-pub use deferred::run as run_deferred_operation;
 #[cfg(test)]
 mod cleanup_tests;
 #[cfg(test)]
