@@ -652,6 +652,7 @@ fn create_impl(
             branch_name,
             &current_handle,
             &worktree_path,
+            &context.main_worktree_root,
             &context.config,
             &options_with_prompt,
             hook_output,
@@ -695,6 +696,7 @@ fn create_impl(
         branch_name,
         &current_handle,
         &worktree_path,
+        &context.main_worktree_root,
         &context.config,
         &options_with_prompt,
         agent,
@@ -832,6 +834,7 @@ pub fn create_with_changes(
                 &create_result.resolved_handle,
                 &cleanup_result,
                 mode,
+                context.config.default_session(),
             )?;
 
             Err(anyhow!(

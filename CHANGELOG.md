@@ -21,9 +21,12 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
-## Unreleased
+## v0.1.263 (2026-09-16)
 
+- Fix dashboard removal and sweep actions targeting the wrong worktree when managing multiple projects. ([#272](https://github.com/raine/workmux/pull/272))
 - Prevent Pi and Oh My Pi status integrations from overwriting each other, and stop Oh My Pi from briefly showing waiting while tools start.
+- Fix `post_create` hooks receiving an incorrect `WM_PROJECT_ROOT` when using nested or alternate configs outside the repository. ([#283](https://github.com/raine/workmux/issues/283))
+- Add `default_session` to name a session that clients return to when a workmux session closes in session mode, instead of whichever session each client viewed previously. ([#278](https://github.com/raine/workmux/pull/278))
 
 ## v0.1.262 (2026-09-12)
 
@@ -35,7 +38,7 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 - Fix worktree creation failing in repositories with symlinked or hard-linked Git hooks outside container sandboxes. ([#274](https://github.com/raine/workmux/issues/274))
 - Fix `workmux set-window-status clear` leaving stale agent status in the sidebar.
 
-## v0.1.260 (2026-09-11)
+## v0.1.260 (2026-09-11
 
 - Create worktrees without a terminal multiplexer using `workmux add --headless`, with file operations and setup hooks included. Add `--json` for automation, and attach later with `workmux open`.
 - Hide or reorder columns in the dashboard's Worktrees tab with `dashboard.worktree_columns`. ([#270](https://github.com/raine/workmux/issues/270))

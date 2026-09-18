@@ -450,6 +450,7 @@ pub fn open(
         &branch_name,
         &handle,
         &worktree_path,
+        &context.main_worktree_root,
         &context.config,
         &options_with_workdir,
         agent,

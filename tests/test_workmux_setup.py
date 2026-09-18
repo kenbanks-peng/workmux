@@ -362,9 +362,7 @@ class TestSetupInstall:
         assert 'workmux", ["set-window-status' in extension_text
         assert 'pi.on("session_start"' in extension_text
         assert '["register-agent"]' in extension_text
-        assert 'pi.on("message_end"' in extension_text
-        assert '"role" in event.message' in extension_text
-        assert 'event.message.role === "assistant"' in extension_text
+        assert 'pi.on("message_end"' not in extension_text
         assert 'event.toolName === "ask"' in extension_text
         assert 'setStatus("waiting")' in extension_text
 
