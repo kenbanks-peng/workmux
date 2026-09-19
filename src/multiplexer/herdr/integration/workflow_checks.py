@@ -44,6 +44,41 @@ def conflict_fixture(f):
     return pane, worktree, feature_head, main_head
 
 
+def session_check(f, check, removed):
+    f.session_mode = True
+    before = f.server.request("session.snapshot")["snapshot"]
+    check(f)
+    after = f.server.request("session.snapshot")["snapshot"]
+    original = {w["workspace_id"] for w in before["workspaces"]}
+    remaining = {w["workspace_id"] for w in after["workspaces"]}
+    assert original <= remaining
+    feature = [w for w in after["workspaces"] if w["label"] == "wm-feature"]
+    if removed:
+        assert remaining == original and not feature, after
+    else:
+        assert len(feature) == 1 and len(remaining - original) == 1, after
+        f.run("open", "feature")
+        assert (
+            f.server.request("session.snapshot")["snapshot"]["focused_workspace_id"]
+            == feature[0]["workspace_id"]
+        )
+    print(
+        f"PASS session mode: {check.__name__}; parent preserved and feature workspace {'removed' if removed else 'accessible'}"
+    )
+
+
+def session_merge_conflicts(f):
+    session_check(f, merge_conflicts, removed=True)
+
+
+def session_merge_squash(f):
+    session_check(f, merge_squash, removed=True)
+
+
+def session_rebase_conflicts(f):
+    session_check(f, rebase_conflicts, removed=False)
+
+
 def merge_hooks(f):
     marker = f.server.root / "merge-hooks.json"
     allow = f.server.root / "allow-merge"

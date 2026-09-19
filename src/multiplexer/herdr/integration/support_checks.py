@@ -13,12 +13,20 @@ import sys
 import time
 from pathlib import Path
 
-from diff_checks import diff_actions
+from diff_checks import diff_actions, patch_split
 from focus_checks import focus_protocol
 from run import ROOT, env_for
 from server import HerdrServer, wait_until
 from session_checks import session, session_layout, session_navigation, session_recovery
-from workflow_checks import merge_conflicts, merge_hooks, merge_squash, rebase_conflicts
+from workflow_checks import (
+    merge_conflicts,
+    merge_hooks,
+    merge_squash,
+    rebase_conflicts,
+    session_merge_conflicts,
+    session_merge_squash,
+    session_rebase_conflicts,
+)
 
 BINARY = ROOT / "target/debug/workmux"
 
@@ -30,6 +38,7 @@ class Fixture:
         self.repo = server.root / "repo"
         self.repo.mkdir()
         self.counter = 0
+        self.session_mode = False
         self.config({"panes": [{}]})
         for args in (
             ["init", "-b", "main"],
@@ -98,9 +107,20 @@ class Fixture:
         return shlex.join([str(BINARY), *args])
 
     def add(self, name="feature"):
-        self.run("add", name, "--parent-session", "parent", "--background")
+        options = ["--session"] if self.session_mode else ["--parent-session", "parent"]
+        self.run("add", name, *options, "--background")
         snapshot = self.server.request("session.snapshot")["snapshot"]
-        tab = next(t for t in snapshot["tabs"] if t["label"] == f"wm-{name}")
+        if self.session_mode:
+            workspace = next(
+                w for w in snapshot["workspaces"] if w["label"] == f"wm-{name}"
+            )
+            tab = next(
+                t
+                for t in snapshot["tabs"]
+                if t["workspace_id"] == workspace["workspace_id"]
+            )
+        else:
+            tab = next(t for t in snapshot["tabs"] if t["label"] == f"wm-{name}")
         return next(p for p in snapshot["panes"] if p["tab_id"] == tab["tab_id"])
 
 
@@ -979,6 +999,49 @@ def reap(f):
     )
 
 
+def reap_eof(f):
+    ready = f.server.root / "eof-ready"
+    interrupted = f.server.root / "interrupted"
+    stopped = f.server.root / "eof-stopped"
+    stub = f.server.root / "claude"
+    stub.write_text(
+        f"#!{sys.executable}\nimport os, signal, subprocess\n"
+        f"signal.signal(signal.SIGINT, lambda *_: open({str(interrupted)!r}, 'w').write('interrupt'))\n"
+        f"subprocess.run([{str(BINARY)!r}, 'register-agent'], check=True)\n"
+        f"subprocess.run([{str(BINARY)!r}, 'set-window-status', 'working'], check=True)\n"
+        f"open({str(ready)!r}, 'w').write('ready')\n"
+        "while os.read(0, 4096): pass\n"
+        f"open({str(stopped)!r}, 'w').write('eof')\n"
+    )
+    stub.chmod(0o700)
+    f.config({"agent": str(stub), "panes": [{"command": "<agent>"}]})
+    pane = f.add()
+    wait_until(lambda: ready.exists())
+    files = list(Path(f.env["XDG_STATE_HOME"]).glob("workmux/agents/*.json"))
+    assert len(files) == 1, files
+    state = json.loads(files[0].read_text())
+    state["updated_ts"] -= 7200
+    files[0].write_text(json.dumps(state))
+    result = f.run("reap-agents", "--hours", "1")
+    assert "Would exit" in result.stdout
+    assert not interrupted.exists() and not stopped.exists()
+    result = f.run("reap-agents", "--hours", "1", "--force")
+    assert "Exited" in result.stdout, result
+    assert interrupted.read_text() == "interrupt"
+    assert stopped.read_text() == "eof"
+    assert not files[0].exists()
+    assert not json.loads(f.run("status", "--json").stdout)["agents"]
+    snapshot = f.server.request("session.snapshot")["snapshot"]
+    assert {pane["terminal_id"], f.parent["terminal_id"]} <= {
+        p["terminal_id"] for p in snapshot["panes"]
+    }
+    code, output = f.native(pane, "printf shell-alive")
+    assert code == 0 and output == "shell-alive", output
+    print(
+        "PASS reap-eof: dry-run sends no signal; Ctrl-C is received but does not exit; Ctrl-D exits the agent, removes state and preserves the shell"
+    )
+
+
 def popup(f):
     marker = f.server.root / "popup-result"
     output = f.server.root / "popup-output"
@@ -1040,6 +1103,11 @@ CASES = {
     "merge-squash": merge_squash,
     "rebase-conflicts": rebase_conflicts,
     "merge-hooks": merge_hooks,
+    "session-merge-conflicts": session_merge_conflicts,
+    "session-merge-squash": session_merge_squash,
+    "session-rebase-conflicts": session_rebase_conflicts,
+    "patch-split": patch_split,
+    "reap-eof": reap_eof,
     "multi": multi,
     "multi-open": multi_open,
     "multi-generation": multi_generation,
