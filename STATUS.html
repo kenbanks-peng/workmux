@@ -16,6 +16,7 @@
     tbody th { font-weight: 500; }
     th:nth-child(n+2):nth-child(-n+4), td:nth-child(n+2):nth-child(-n+4) { text-align: center; min-width: 64px; }
     td:last-child { color: light-dark(#555, #bbb); }
+    .interface-table th:nth-child(4), .interface-table td:nth-child(4) { text-align: left; }
     .yes { color: light-dark(#16713d, #73d69b); }
     .no { color: light-dark(#a52a2a, #ff9999); }
     .unknown { color: light-dark(#805900, #ebc56a); }
@@ -65,6 +66,35 @@
         <tr><th scope="row">Hooks</th><td class="yes">✓</td><td class="yes">✓</td><td>60%</td><td>Post-create; pre-remove; pre-merge failure/retry/bypass.</td><td>Remaining hook paths and shell combinations.</td></tr>
         <tr><th scope="row">File sync</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Previously marked supported; case details not recorded.</td><td>Copy/symlink and all-worktree coverage not confirmed.</td></tr>
         <tr><th scope="row">Headless workflows</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Headless add; later open in Herdr. PR, prompt, fork, multi-worktree and target options are restricted.</td><td>Full restricted-option and configuration combinations.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Platform integration points</h2>
+  <p>These lower-level interfaces support the workflows above. A multiplexer session maps to a tmux session or Herdr workspace; a terminal window maps to a tmux window or Herdr tab.</p>
+  <p id="interface-coverage">Test support below refers to Herdr, not tmux or feature availability. ✓ = full test support for the stated scope; ◐ = partial test support; ✗ = no confirmed test support. Percentages are rough estimates of functional test coverage, not measured code coverage or pass rates. Available tests are evidence of test support, not proof of a current passing run. Isolated tests require a Herdr server. No tests were run for this table.</p>
+  <div class="table-wrap">
+    <table class="interface-table" aria-describedby="interface-coverage">
+      <thead><tr><th scope="col">Interface functionality</th><th scope="col">Test support</th><th scope="col">%</th><th scope="col">Tested</th><th scope="col">Untested</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Backend detection and instance selection</th><td class="unknown">◐</td><td>80%</td><td>Backend precedence; nested tmux; explicit instance selection.</td><td>Remote-host combinations remain unverified.</td></tr>
+        <tr><th scope="row">Connection and protocol validation</th><td class="unknown">◐</td><td>70%</td><td>Protocol mismatch rejection; server replacement detection.</td><td>Full disconnect, timeout, and malformed-response cases remain unverified.</td></tr>
+        <tr><th scope="row">Stable target identity and instance isolation</th><td class="unknown">◐</td><td>90%</td><td>Foreign instance rejection; stale target rejection; server replacement; terminal identity after a move.</td><td>Full machine restart remains unverified.</td></tr>
+        <tr><th scope="row">Current caller and target discovery</th><td class="unknown">◐</td><td>80%</td><td>Pane, popup, and external callers; no last-focus fallback.</td><td>All client configurations remain unverified.</td></tr>
+        <tr><th scope="row">Session and window inventory, creation, and placement</th><td class="unknown">◐</td><td>80%</td><td>Names; explicit parent; tab order; duplicate and ambiguous targets; background creation.</td><td>Concurrent creation and all placement combinations remain unverified.</td></tr>
+        <tr><th scope="row">Session, window, and pane labels</th><td class="unknown">◐</td><td>80%</td><td>Rename; Unicode; shell syntax treated as data.</td><td>All label limits and collision cases remain unverified.</td></tr>
+        <tr><th scope="row">Ownership records and guarded target removal</th><td class="unknown">◐</td><td>90%</td><td>Cleanup races; stale identity; extra panes; worker survival after the scheduling process exits.</td><td>All interruption points remain unverified.</td></tr>
+        <tr><th scope="row">Pane split and dimension queries</th><td class="unknown">◐</td><td>80%</td><td>Dimensions; split sizes; invalid limits; rejection of unsupported stacked splits.</td><td>All resize and layout combinations remain unverified.</td></tr>
+        <tr><th scope="row">Session, window, and pane focus; pane zoom</th><td class="unknown">◐</td><td>80%</td><td>Selection; zoom; retained background focus.</td><td>Full multi-client and resize interactions remain unverified.</td></tr>
+        <tr><th scope="row">Focus observation and user acknowledgement</th><td class="unknown">◐</td><td>60%</td><td>API focus events; manual focus; two clients; detach. Protocol 22 restrictions confirmed.</td><td>Successful user acknowledgement.</td></tr>
+        <tr><th scope="row">Shell launch, readiness, and cancellation</th><td class="unknown">◐</td><td>80%</td><td>Readiness handshake; controlled launch; cancellation; cleanup after setup failure.</td><td>All shells remain unverified.</td></tr>
+        <tr><th scope="row">Literal input, paste, submit, and control keys</th><td class="unknown">◐</td><td>80%</td><td>Exact bytes; Unicode; multiline paste; Enter; Ctrl-C; missing targets.</td><td>All key encodings and real agent input modes remain unverified.</td></tr>
+        <tr><th scope="row">Terminal output capture</th><td class="unknown">◐</td><td>70%</td><td>Missing-target handling; captured output in the dashboard.</td><td>All capture limits, output sizes, and terminal sequences remain unverified.</td></tr>
+        <tr><th scope="row">Live pane metadata and process identity</th><td class="unknown">◐</td><td>80%</td><td>Working directory; PID; session/window membership; process identity after a move; process termination.</td><td>Concurrent process changes remain unverified.</td></tr>
+        <tr><th scope="row">Native agent status reports</th><td class="unknown">◐</td><td>80%</td><td>Working/waiting/done/clear; moved, closed, foreign, and stale targets.</td><td>All agent profiles and display settings remain unverified.</td></tr>
+        <tr><th scope="row">Live pane moves</th><td class="unknown">◐</td><td>50%</td><td>Terminal key and PID retained after a cross-workspace move.</td><td>Arbitrary layouts, concurrent moves, and recovery remain unverified.</td></tr>
+        <tr><th scope="row">Sidebar host layout and recovery interface</th><td class="no">✗</td><td>0%</td><td>None confirmed.</td><td>Workmux Herdr sidebar host layout and recovery; sidebar is currently tmux-only.</td></tr>
+        <tr><th scope="row">Guest-to-host RPC operations</th><td class="unknown">◐</td><td>50%</td><td>Heartbeat; status; title; clipboard (4 of 8 operations); authentication.</td><td>Spawn, exec, merge, and close remain unverified end to end.</td></tr>
       </tbody>
     </table>
   </div>
