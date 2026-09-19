@@ -16,6 +16,8 @@ mod identity;
 mod pane_launch;
 #[cfg(test)]
 mod platform_tests;
+#[cfg(test)]
+mod remote_detection_tests;
 mod session;
 #[cfg(test)]
 mod session_tests;
