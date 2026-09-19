@@ -21,6 +21,8 @@ mod setup;
 #[cfg(test)]
 mod setup_tests;
 #[cfg(test)]
+mod shell_launch_tests;
+#[cfg(test)]
 mod tests;
 
 use super::*;
