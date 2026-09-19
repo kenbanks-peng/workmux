@@ -530,9 +530,7 @@ pub trait Multiplexer: Send + Sync {
         Ok(())
     }
 
-    /// Capture at most the last `lines` lines of a pane, with ANSI escapes.
-    /// Exclude trailing line breaks before applying the limit. Zero requests
-    /// empty output; a capture failure returns None.
+    /// Capture the content of a pane
     fn capture_pane(&self, pane_id: &str, lines: u16) -> Option<String>;
 
     /// Whether this backend supports preview capture efficiently.

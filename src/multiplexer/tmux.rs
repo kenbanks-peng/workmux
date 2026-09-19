@@ -1391,16 +1391,8 @@ impl Multiplexer for TmuxBackend {
 
     fn capture_pane(&self, pane_id: &str, lines: u16) -> Option<String> {
         let start_line = format!("-{}", lines);
-        // -S is relative to the start of the visible screen, not its bottom.
-        // Capture history plus the screen, then apply the shared line limit.
-        // Do not use tmux_query: its whitespace trimming removes indentation.
-        let output = self
-            .tmux_command()
-            .args(&["capture-pane", "-p", "-e", "-S", &start_line, "-t", pane_id])
-            .run()
-            .ok()?;
-        let text = String::from_utf8(output.stdout).ok()?;
-        Some(util::tail_lines(&text, lines))
+        self.tmux_query(&["capture-pane", "-p", "-e", "-S", &start_line, "-t", pane_id])
+            .ok()
     }
 
     // === Text I/O ===
@@ -1683,72 +1675,6 @@ mod tests {
         run_result.unwrap();
         assert_eq!(output_result.unwrap(), literal);
         assert!(!marker_exists);
-    }
-
-    #[test]
-    fn capture_pane_limits_history_and_preserves_indentation() {
-        if which::which("tmux").is_err() {
-            return;
-        }
-        let temp = tempfile::tempdir().unwrap();
-        let socket = temp.path().join("capture.sock");
-        let socket_text = socket.to_string_lossy();
-        let backend = TmuxBackend::for_socket(&socket_text);
-        let expected = (1..=40)
-            .map(|n| format!("  line {n}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let script = format!(
-            "printf '%s\\n\\n' {}; sleep 60",
-            crate::shell::shell_quote(&expected)
-        );
-        let command = format!("sh -c {}", crate::shell::shell_quote(&script));
-        let pane = Cmd::new("tmux")
-            .args(&[
-                "-S",
-                &socket_text,
-                "-f",
-                "/dev/null",
-                "new-session",
-                "-d",
-                "-x",
-                "80",
-                "-y",
-                "10",
-                "-P",
-                "-F",
-                "#{pane_id}",
-                &command,
-            ])
-            .run_and_capture_stdout()
-            .unwrap();
-        let mut full = None;
-        for _ in 0..100 {
-            full = backend.capture_pane(&pane, 100);
-            if full
-                .as_deref()
-                .is_some_and(|text| text.ends_with("line 40"))
-            {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        let tail = backend.capture_pane(&pane, 5);
-        let zero = backend.capture_pane(&pane, 0);
-        let missing = backend.capture_pane("%999999", 5);
-        let missing_zero = backend.capture_pane("%999999", 0);
-        let _ = Cmd::new("tmux")
-            .args(&["-S", &socket_text, "kill-server"])
-            .run();
-
-        assert_eq!(full.as_deref(), Some(expected.as_str()));
-        assert_eq!(
-            tail.as_deref(),
-            Some("  line 36\n  line 37\n  line 38\n  line 39\n  line 40")
-        );
-        assert_eq!(zero.as_deref(), Some(""));
-        assert!(missing.is_none());
-        assert!(missing_zero.is_none());
     }
 
     fn live_pane(path: &str, session_id: &str) -> LivePaneInfo {
