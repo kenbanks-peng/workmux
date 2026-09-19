@@ -13,6 +13,8 @@ mod detection_tests;
 mod identity;
 mod pane_launch;
 #[cfg(test)]
+mod label_tests;
+#[cfg(test)]
 mod platform_tests;
 mod session;
 #[cfg(test)]
