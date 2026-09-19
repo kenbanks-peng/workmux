@@ -21,6 +21,10 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
+## Unreleased
+
+- Keep Pi panes marked as working throughout automatic compaction when delegated activity tracking is enabled, preserving the elapsed timer until the continuation finishes.
+
 ## v0.1.263 (2026-09-16)
 
 - Fix dashboard removal and sweep actions targeting the wrong worktree when managing multiple projects. ([#272](https://github.com/raine/workmux/pull/272))
