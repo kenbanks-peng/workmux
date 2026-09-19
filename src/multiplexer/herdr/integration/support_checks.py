@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 
+from diff_checks import diff_actions
 from focus_checks import focus_protocol
 from run import ROOT, env_for
 from server import HerdrServer, wait_until
@@ -1046,6 +1047,7 @@ CASES = {
     "multi-failure": multi_failure,
     "continue-fork": continue_fork,
     "dashboard": dashboard,
+    "diff-actions": diff_actions,
     "navigation": navigation,
     "resurrect": resurrect,
     "resurrect-failure": resurrect_failure,
