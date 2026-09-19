@@ -1,4 +1,7 @@
 //! Adapter contract tests. These do not establish real-server acceptance.
+#[path = "process_metadata_tests.rs"]
+mod process_metadata_tests;
+
 use super::*;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
