@@ -12,6 +12,8 @@ mod deferred_unit_tests;
 mod detection_tests;
 mod identity;
 mod pane_launch;
+#[cfg(test)]
+mod platform_tests;
 mod session;
 #[cfg(test)]
 mod session_tests;
