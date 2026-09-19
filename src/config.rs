@@ -15,6 +15,11 @@ use which::{which, which_in};
 /// making the workmux remove command return almost instantly.
 const NODE_MODULES_CLEANUP_SCRIPT: &str = include_str!("scripts/cleanup_node_modules.sh");
 
+/// Placeholder usable in `pre_remove` that expands to the built-in
+/// node_modules cleanup script. Lets a project keep the fast cleanup alongside
+/// its own hooks, which would otherwise replace the automatic default.
+const CLEANUP_NODE_MODULES_PLACEHOLDER: &str = "<cleanup-node-modules>";
+
 /// Names of lockfiles that mark a directory as a Node.js package.
 const NODE_LOCKFILES: [&str; 3] = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"];
 
@@ -2607,6 +2612,16 @@ impl Config {
             }
         }
 
+        // Runs after the merge so the placeholder is expanded wherever it came
+        // from, including entries spliced in from the global config.
+        if let Some(hooks) = config.pre_remove.as_mut() {
+            for hook in hooks.iter_mut() {
+                if hook.trim() == CLEANUP_NODE_MODULES_PLACEHOLDER {
+                    *hook = NODE_MODULES_CLEANUP_SCRIPT.to_string();
+                }
+            }
+        }
+
         if config.hook_shell.is_none() {
             config.hook_shell = Some(vec!["bash".to_string(), "-c".to_string()]);
         }
@@ -3304,6 +3319,8 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # Useful for backing up gitignored files before cleanup.
 # Default: Auto-detects Node.js projects and fast-deletes node_modules.
 # Detection looks for a lockfile at the project root or in a direct subdirectory.
+# Defining any command here replaces that default; use "<cleanup-node-modules>"
+# to keep the fast cleanup alongside your own commands.
 # Use "<global>" to inherit from global config.
 # Set to empty list to disable: `pre_remove: []`
 # Environment variables available:
@@ -3314,6 +3331,7 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #   - "<global>"
 #   - mkdir -p "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE"
 #   - cp -r test-results/ "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE/"
+#   - "<cleanup-node-modules>"
 
 #-------------------------------------------------------------------------------
 # Files
@@ -3521,12 +3539,12 @@ mod tests {
 
     use super::{
         AgentColumn, AgentEnvValue, AgentIconConfig, AgentIconDetails, AllowedDomainDetails,
-        AllowedDomainEntry, Config, ContainerConfig, ContainerDevice, DEFAULT_AGENT_COLUMNS,
-        DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig, LayoutConfig, LimaConfig,
-        NODE_MODULES_CLEANUP_SCRIPT, NetworkConfig, NetworkPolicy, PaneConfig, SandboxConfig,
-        SandboxRuntime, SandboxTarget, SidebarHeight, SidebarPosition, SidebarWidth,
-        SplitDirection, ToolchainMode, WindowPlacement, WorktreeColumn, is_agent_command,
-        validate_domain, validate_group_add_entry, validate_layouts_config,
+        AllowedDomainEntry, CLEANUP_NODE_MODULES_PLACEHOLDER, Config, ContainerConfig,
+        ContainerDevice, DEFAULT_AGENT_COLUMNS, DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig,
+        LayoutConfig, LimaConfig, NODE_MODULES_CLEANUP_SCRIPT, NetworkConfig, NetworkPolicy,
+        PaneConfig, SandboxConfig, SandboxRuntime, SandboxTarget, SidebarHeight, SidebarPosition,
+        SidebarWidth, SplitDirection, ToolchainMode, WindowPlacement, WorktreeColumn,
+        is_agent_command, validate_domain, validate_group_add_entry, validate_layouts_config,
     };
     use crate::test_support;
     use tempfile::TempDir;
@@ -4091,6 +4109,53 @@ mod tests {
                 .unwrap();
 
         assert_eq!(config.pre_remove, Some(vec![]));
+    }
+
+    #[test]
+    fn cleanup_node_modules_placeholder_expands_to_builtin_script() {
+        let root = tempfile::tempdir().unwrap();
+        let project = Config {
+            pre_remove: Some(vec![
+                "cp -r test-results/ /tmp/out".to_string(),
+                CLEANUP_NODE_MODULES_PLACEHOLDER.to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let config =
+            Config::merge_and_apply_defaults(Config::default(), project, None, root.path())
+                .unwrap();
+
+        assert_eq!(
+            config.pre_remove,
+            Some(vec![
+                "cp -r test-results/ /tmp/out".to_string(),
+                NODE_MODULES_CLEANUP_SCRIPT.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn cleanup_node_modules_placeholder_expands_when_inherited_from_global() {
+        let root = tempfile::tempdir().unwrap();
+        let global = Config {
+            pre_remove: Some(vec![CLEANUP_NODE_MODULES_PLACEHOLDER.to_string()]),
+            ..Default::default()
+        };
+        let project = Config {
+            pre_remove: Some(vec!["<global>".to_string(), "echo done".to_string()]),
+            ..Default::default()
+        };
+
+        let config = Config::merge_and_apply_defaults(global, project, None, root.path()).unwrap();
+
+        assert_eq!(
+            config.pre_remove,
+            Some(vec![
+                NODE_MODULES_CLEANUP_SCRIPT.to_string(),
+                "echo done".to_string(),
+            ])
+        );
     }
 
     #[test]

@@ -25,6 +25,7 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 
 - Keep Pi panes marked as working throughout automatic compaction when delegated activity tracking is enabled, preserving the elapsed timer until the continuation finishes.
 - Enable the fast `node_modules` cleanup on worktree removal in monorepos where the lockfile lives in a subdirectory, such as `dashboard/pnpm-lock.yaml`, instead of only at the project root.
+- Keep the fast `node_modules` cleanup when a project defines its own `pre_remove` commands by listing `"<cleanup-node-modules>"` among them. Previously any `pre_remove` entry replaced the cleanup entirely.
 
 ## v0.1.263 (2026-09-16)
 

@@ -450,6 +450,16 @@ pre_merge:
   - just check
 ```
 
+In Node.js projects, `pre_remove` defaults to a fast `node_modules` cleanup, and
+defining your own commands replaces that default. Use
+`"<cleanup-node-modules>"` to keep it:
+
+```yaml
+pre_remove:
+  - cp -r test-results/ "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE/"
+  - "<cleanup-node-modules>"
+```
+
 #### Agent status icons
 
 Customize the icons shown in tmux window names:
@@ -2538,7 +2548,8 @@ take significant time. workmux has a
 that moves `node_modules` to a temporary location and deletes it in the
 background, making the `remove` command return almost instantly. It is enabled
 automatically when a lockfile (`pnpm-lock.yaml`, `package-lock.json`, or
-`yarn.lock`) exists at the project root or in a direct subdirectory.
+`yarn.lock`) exists at the project root or in a direct subdirectory. You can also
+request it explicitly with `"<cleanup-node-modules>"` in `pre_remove`.
 
 ### Rust projects
 

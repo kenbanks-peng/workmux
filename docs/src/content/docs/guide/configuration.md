@@ -296,6 +296,14 @@ pre_merge:
   - just check
 ```
 
+In Node.js projects, `pre_remove` defaults to a fast `node_modules` cleanup, and defining your own commands replaces that default. Use `"<cleanup-node-modules>"` to keep it alongside them:
+
+```yaml
+pre_remove:
+  - cp -r test-results/ "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE/"
+  - "<cleanup-node-modules>"
+```
+
 ### Agent status icons
 
 Customize the icons shown in tmux window names:
