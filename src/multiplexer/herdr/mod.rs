@@ -1240,6 +1240,11 @@ setup::impl_backend! {
         self.send_key(p, "enter")
     }
     fn send_key(&self, p: &str, key: &str) -> Result<()> {
+        let key = match key {
+            " " => "space",
+            "BSpace" => "backspace",
+            key => key,
+        };
         let key = key
             .strip_prefix("C-")
             .filter(|key| key.len() == 1)

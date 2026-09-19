@@ -31,7 +31,7 @@
     <table aria-describedby="legend">
       <thead><tr><th scope="col">Functionality</th><th scope="col">tmux</th><th scope="col">WezTerm</th><th scope="col">kitty</th><th scope="col">Herdr</th><th scope="col">Comment</th></tr></thead>
       <tbody>
-        <tr><th scope="row">Create / open worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>To create or open multiple worktrees in window mode, run Workmux inside a herdr pane, since external calls cannot identify the parent workspace and multi-worktree <code>workmux add</code> and <code>workmux open</code> reject <code>--parent-session</code>. Frontmatter add is an exception.</td></tr>
+        <tr><th scope="row">Create / open worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>Multi-worktree add/open in window mode requires a Herdr pane, except frontmatter add.</td></tr>
         <tr><th scope="row">List worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Close / remove worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Deferred cleanup</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
@@ -40,28 +40,28 @@
         <tr><th scope="row">Focus / zoom panes</th><td class="yes">✓</td><td class="unknown">◐</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Send input / capture output</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Native agent status display</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Clear status on focus</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="no">✗</td><td>Protocol 22 cannot reliably detect user focus. Waiting/done status does not clear on focus.</td></tr>
+        <tr><th scope="row">Clear status on focus</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="no">✗</td><td>Waiting/done status does not clear on focus; protocol 22 cannot reliably detect user focus.</td></tr>
         <tr><th scope="row">Sidebar</th><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td>Workmux sidebar requires tmux.</td></tr>
         <tr><th scope="row">Merge</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Rebase</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some rebase options are not fully tested.</td></tr>
+        <tr><th scope="row">Rebase</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some rebase options remain untested.</td></tr>
         <tr><th scope="row">Rename</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some messages incorrectly say “tmux”.</td></tr>
-        <tr><th scope="row">Resurrect</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Duplicate parent names block recovery. After partial setup, close the partial layout and fix configuration before retry.</td></tr>
-        <tr><th scope="row">Popup workflows / command restrictions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Popup add needs <code>--parent-session</code>. tmux popup bindings do not apply.</td></tr>
-        <tr><th scope="row">Dashboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Actions other than Enter-to-focus are not fully tested.</td></tr>
+        <tr><th scope="row">Resurrect</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Duplicate parent names block recovery. Partial setup requires manual cleanup and configuration repair.</td></tr>
+        <tr><th scope="row">Popup workflows / command restrictions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Popup add needs <code>--parent-session</code>. tmux popup bindings do not apply.</td></tr>
+        <tr><th scope="row">Dashboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Mouse interaction and some actions remain untested.</td></tr>
         <tr><th scope="row">Diff actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Patch actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">PR / MR creation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Remote PR/MR creation untested; requires external tools.</td></tr>
-        <tr><th scope="row">Multiple agents</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Count, multiple-agent, foreach, and stdin generation reject <code>--parent-session</code>. Real agent replay and Linux untested.</td></tr>
-        <tr><th scope="row">Continue / fork</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Real agent replay and Codex fork untested.</td></tr>
+        <tr><th scope="row">PR / MR workflows</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Remote PR/MR creation, live forge access, and fork requests remain untested.</td></tr>
+        <tr><th scope="row">Multiple agents</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Multi-agent generation in window mode requires invocation from a Herdr pane; external and popup calls cannot specify a parent workspace. Real agent replay and Linux untested.</td></tr>
+        <tr><th scope="row">Continue / fork</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Real agent replay and Codex fork untested.</td></tr>
         <tr><th scope="row">Status</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Wait</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Last-agent navigation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>External calls cannot record the return pane.</td></tr>
+        <tr><th scope="row">Last-agent navigation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>External calls cannot record the return pane.</td></tr>
         <tr><th scope="row">Run commands with output / exit tracking</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Unresponsive agents untested.</td></tr>
-        <tr><th scope="row">Sandbox support</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Real guest launch and Herdr identity routing unverified.</td></tr>
-        <tr><th scope="row">Host RPC</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Guest-to-Herdr status and identity routing unverified.</td></tr>
-        <tr><th scope="row">Clipboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Host clipboard access and guest transfer unverified.</td></tr>
-        <tr><th scope="row">Hooks</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Hook paths beyond post-create, pre-remove, pre-merge, and agent status are not fully tested.</td></tr>
+        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
+        <tr><th scope="row">Sandbox support</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Guest launch and Herdr identity routing untested.</td></tr>
+        <tr><th scope="row">Host RPC</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Guest-to-Herdr status and identity routing untested.</td></tr>
+        <tr><th scope="row">Clipboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Host clipboard access and guest transfer untested.</td></tr>
+        <tr><th scope="row">Hooks</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some hook paths remain untested.</td></tr>
         <tr><th scope="row">File sync</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Headless workflows</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>PR, prompt, fork, multi-worktree, and target options restricted.</td></tr>
       </tbody>

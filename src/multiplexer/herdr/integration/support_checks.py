@@ -13,8 +13,15 @@ import sys
 import time
 from pathlib import Path
 
+from dashboard_checks import (
+    dashboard_input,
+    dashboard_kill,
+    dashboard_sweep,
+    dashboard_worktrees,
+)
 from diff_checks import diff_actions, patch_split
 from focus_checks import focus_protocol
+from reap_checks import reap_unresponsive
 from run import ROOT, env_for
 from server import HerdrServer, wait_until
 from session_checks import session, session_layout, session_navigation, session_recovery
@@ -1108,6 +1115,7 @@ CASES = {
     "session-rebase-conflicts": session_rebase_conflicts,
     "patch-split": patch_split,
     "reap-eof": reap_eof,
+    "reap-unresponsive": reap_unresponsive,
     "multi": multi,
     "multi-open": multi_open,
     "multi-generation": multi_generation,
@@ -1115,6 +1123,10 @@ CASES = {
     "multi-failure": multi_failure,
     "continue-fork": continue_fork,
     "dashboard": dashboard,
+    "dashboard-input": dashboard_input,
+    "dashboard-kill": dashboard_kill,
+    "dashboard-worktrees": dashboard_worktrees,
+    "dashboard-sweep": dashboard_sweep,
     "diff-actions": diff_actions,
     "navigation": navigation,
     "resurrect": resurrect,
