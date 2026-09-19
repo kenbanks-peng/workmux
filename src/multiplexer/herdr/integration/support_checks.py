@@ -2,7 +2,7 @@
 
 Build workmux first. Run one named case, or run all cases with no argument.
 These tests use temporary repositories and never contact a user's server.
-They assert both working paths and known restrictions in support.html.
+They assert both working paths and known restrictions in STATUS.html.
 When a restriction is fixed, update its assertion and table entry together.
 """
 
@@ -17,6 +17,7 @@ from focus_checks import focus_protocol
 from run import ROOT, env_for
 from server import HerdrServer, wait_until
 from session_checks import session, session_layout, session_navigation, session_recovery
+from workflow_checks import merge_conflicts, merge_hooks, merge_squash, rebase_conflicts
 
 BINARY = ROOT / "target/debug/workmux"
 
@@ -418,15 +419,14 @@ def multi(f):
     other = f.server.request(
         "workspace.create", label="other", cwd=str(f.repo), focus=True
     )["root_pane"]
-    f.run(
-        "add",
-        "multi",
-        "--count",
-        "2",
-        "--parent-session",
-        "parent",
-        "--background",
+    result = f.run(
+        "add", "multi", "--count", "2", "--parent-session", "parent",
+        "--background", ok=False,
     )
+    assert result.returncode != 0, result
+    assert "cannot be used with multi-worktree generation" in result.stderr, result
+    code, output = f.native(f.parent, f.wm("add", "multi", "--count", "2", "--background"))
+    assert code == 0, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     tabs = [t for t in snapshot["tabs"] if t["label"].startswith("wm-multi")]
     assert {t["label"] for t in tabs} == {"wm-multi-1", "wm-multi-2"}, tabs
@@ -443,11 +443,15 @@ def multi(f):
         )
         assert report.get("agent_status") == "working", report
     print(
-        "PASS multi: two external --count stub launches use the explicit parent, retain background focus, register and report working in separate worktrees"
+        "PASS multi: external --count with explicit parent is refused; native-pane launches retain background focus, register and report working in separate worktrees"
     )
 
 
-def multi_generation(f):
+def multi_session_generation(f):
+    multi_generation(f, session_mode=True)
+
+
+def multi_generation(f, session_mode=False):
     stub = f.server.root / "claude"
     stub.write_text(
         "#!/bin/sh\n"
@@ -484,15 +488,29 @@ def multi_generation(f):
     )
     expected = set()
     for base, args, stdin, names in cases:
-        f.run(
-            "add",
-            base,
-            *args,
-            "--parent-session",
-            "parent",
-            "--background",
-            input=stdin,
-        )
+        if session_mode:
+            f.run("add", base, *args, "--session", "--background", input=stdin)
+        else:
+            before = f.server.request("session.snapshot")["snapshot"]
+            worktrees_before = f.run("list").stdout
+            result = f.run(
+                "add", base, *args, "--parent-session", "parent", "--background",
+                input=stdin, ok=False,
+            )
+            if base == "frontmatter":
+                # Frontmatter expansion occurs after the explicit-target guard.
+                assert result.returncode == 0, result.stdout + result.stderr
+            else:
+                assert result.returncode != 0, result
+                assert "cannot be used with multi-worktree generation" in result.stderr, result
+                after = f.server.request("session.snapshot")["snapshot"]
+                assert after["tabs"] == before["tabs"]
+                assert f.run("list").stdout == worktrees_before
+                command = f.wm("add", base, *args, "--background")
+                if stdin is not None:
+                    command = f"printf %s {shlex.quote(stdin)} | {command}"
+                code, output = f.native(f.parent, command)
+                assert code == 0, output
         expected |= names
 
         def working(expected=expected):
@@ -503,10 +521,19 @@ def multi_generation(f):
 
         wait_until(working)
         snapshot = f.server.request("session.snapshot")["snapshot"]
-        tabs = [t for t in snapshot["tabs"] if t["label"].startswith("wm-")]
-        assert {t["label"] for t in tabs} == {"wm-" + n for n in expected}, tabs
-        assert all(t["workspace_id"] == f.parent["workspace_id"] for t in tabs)
+        if session_mode:
+            workspaces = [w for w in snapshot["workspaces"] if w["label"].startswith("wm-")]
+            assert {w["label"] for w in workspaces} == {"wm-" + n for n in expected}, workspaces
+            workspace_ids = {w["workspace_id"] for w in workspaces}
+            tabs = [t for t in snapshot["tabs"] if t["workspace_id"] in workspace_ids]
+            assert len(tabs) == len(expected), tabs
+            assert {t["workspace_id"] for t in tabs} == workspace_ids, tabs
+        else:
+            tabs = [t for t in snapshot["tabs"] if t["label"].startswith("wm-")]
+            assert {t["label"] for t in tabs} == {"wm-" + n for n in expected}, tabs
+            assert all(t["workspace_id"] == f.parent["workspace_id"] for t in tabs)
         assert snapshot["focused_tab_id"] == other["tab_id"], snapshot
+        assert snapshot["focused_workspace_id"] == other["workspace_id"], snapshot
         reports = [
             p for p in snapshot["panes"] if p["tab_id"] in {t["tab_id"] for t in tabs}
         ]
@@ -514,8 +541,10 @@ def multi_generation(f):
             p.get("agent_status") == "working" for p in reports
         ), reports
     print(
-        "PASS multi-generation: multiple --agent, --foreach, stdin and frontmatter "
-        "use explicit parent; unique names, background focus and normal working status"
+        f"PASS multi-generation ({'session' if session_mode else 'window'}): "
+        "multiple --agent, --foreach, stdin and frontmatter; correct placement, "
+        "unique names, background focus and normal working status; "
+        + ("external session calls" if session_mode else "explicit parent refused for agent/foreach/stdin; native calls and external frontmatter pass")
     )
 
 
@@ -527,7 +556,7 @@ def multi_failure(f):
     result = f.run(
         "add", "ambiguous", "--count", "2", "--parent-session", "parent", ok=False
     )
-    assert result.returncode != 0 and "ambiguous (2 matches)" in result.stderr, result
+    assert result.returncode != 0 and "cannot be used with multi-worktree generation" in result.stderr, result
     after = f.server.request("session.snapshot")["snapshot"]
     assert after["tabs"] == before["tabs"] and after["panes"] == before["panes"]
     f.server.request(
@@ -553,9 +582,10 @@ def multi_failure(f):
         cwd=str(f.repo),
         focus=False,
     )["root_pane"]
-    f.run(
-        "add", "collision", "--count", "2", "--parent-session", "parent", "--background"
+    code, output = f.native(
+        f.parent, f.wm("add", "collision", "--count", "2", "--background")
     )
+    assert code == 0, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     owned = [
         t for t in snapshot["tabs"] if t["workspace_id"] == f.parent["workspace_id"]
@@ -570,17 +600,10 @@ def multi_failure(f):
         for p in f.server.request("session.snapshot")["snapshot"]["panes"]
     )
     # Duplicate generated names fail, rather than sharing one target or replacing it.
-    result = f.run(
-        "add",
-        "duplicate",
-        "--foreach",
-        "item:same,same",
-        "--parent-session",
-        "parent",
-        "--background",
-        ok=False,
+    code, output = f.native(
+        f.parent, f.wm("add", "duplicate", "--foreach", "item:same,same", "--background")
     )
-    assert result.returncode != 0 and "already exists" in result.stderr, result
+    assert code != 0 and "already exists" in output, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     assert len([t for t in snapshot["tabs"] if t["label"] == "wm-duplicate-same"]) == 1
     f.run("remove", "duplicate-same", "--force")
@@ -593,19 +616,10 @@ def multi_failure(f):
     )
     hook.chmod(0o700)
     f.config({"panes": [{}], "post_create": [str(hook)]})
-    result = f.run(
-        "add",
-        "partial",
-        "--count",
-        "3",
-        "--parent-session",
-        "parent",
-        "--background",
-        ok=False,
+    code, output = f.native(
+        f.parent, f.wm("add", "partial", "--count", "3", "--background")
     )
-    assert result.returncode != 0 and "limits each split to 10–90%" in result.stderr, (
-        result
-    )
+    assert code != 0 and "limits each split to 10–90%" in output, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     tabs = [t for t in snapshot["tabs"] if t["label"].startswith("wm-partial")]
     assert {t["label"] for t in tabs} == {"wm-partial-1", "wm-partial-2"}, tabs
@@ -621,7 +635,7 @@ def multi_failure(f):
         foreign["terminal_id"],
     }, snapshot
     print(
-        "PASS multi-failure: ambiguous parents allocate no tabs; no inherited-ID fallback; "
+        "PASS multi-failure: explicit parent refused without tabs; no inherited-ID fallback; native-pane "
         "collision suffix, duplicate names and partial launch preserve user layouts; owned cleanup"
     )
 
@@ -634,14 +648,15 @@ def multi_open(f):
     )["root_pane"]
     before = f.server.request("session.snapshot")["snapshot"]
     result = f.run("open", "first", "last", "--parent-session", "parent", ok=False)
-    assert result.returncode != 0 and "Failed to open all 2" in result.stderr, result
-    assert "ambiguous (2 matches)" in result.stderr, result
+    assert result.returncode != 0, result
+    assert "cannot be used when opening multiple worktrees" in result.stderr, result
     after = f.server.request("session.snapshot")["snapshot"]
     assert after["tabs"] == before["tabs"] and after["panes"] == before["panes"]
     f.server.request(
         "workspace.rename", workspace_id=other["workspace_id"], label="other"
     )
-    f.run("open", "first", "last", "--parent-session", "parent")
+    code, output = f.native(f.parent, f.wm("open", "first", "last"))
+    assert code == 0, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     tabs = [t for t in snapshot["tabs"] if t["label"] in {"wm-first", "wm-last"}]
     assert len(tabs) == 2, tabs
@@ -652,21 +667,21 @@ def multi_open(f):
     # Open continues after one failure, unlike add, which stops on failure.
     for name in ("first", "last"):
         f.run("close", name)
-    result = f.run(
-        "open", "first", "missing", "last", "--parent-session", "parent", ok=False
-    )
-    assert result.returncode != 0 and "Failed to open 1 of 3" in result.stderr, result
+    code, output = f.native(f.parent, f.wm("open", "first", "missing", "last"))
+    assert code != 0 and "Failed to open 1 of 3" in output, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     tabs = [t for t in snapshot["tabs"] if t["label"] in {"wm-first", "wm-last"}]
     assert len(tabs) == 2 and all(
         t["workspace_id"] == f.parent["workspace_id"] for t in tabs
     ), snapshot
     # Repeated names switch to the owned target; --new makes distinct targets.
-    f.run("open", "first", "first", "--parent-session", "parent")
+    code, output = f.native(f.parent, f.wm("open", "first", "first"))
+    assert code == 0, output
     assert len(f.server.request("session.snapshot")["snapshot"]["tabs"]) == len(
         snapshot["tabs"]
     )
-    f.run("open", "first", "first", "--new", "--parent-session", "parent")
+    code, output = f.native(f.parent, f.wm("open", "first", "first", "--new"))
+    assert code == 0, output
     snapshot = f.server.request("session.snapshot")["snapshot"]
     tabs = [t for t in snapshot["tabs"] if t["label"].startswith("wm-first")]
     assert {t["label"] for t in tabs} == {"wm-first", "wm-first-2", "wm-first-3"}
@@ -679,7 +694,7 @@ def multi_open(f):
         other["terminal_id"],
     }, snapshot
     print(
-        "PASS multi-open: explicit placement, foreground focus, partial failure, "
+        "PASS multi-open: external explicit parent refused; native-pane placement, foreground focus, partial failure, "
         "repeated names, --new suffixes and owned cleanup preserve user panes"
     )
 
@@ -1020,9 +1035,14 @@ CASES = {
     "wait": wait,
     "run": run_commands,
     "hooks": hooks,
+    "merge-conflicts": merge_conflicts,
+    "merge-squash": merge_squash,
+    "rebase-conflicts": rebase_conflicts,
+    "merge-hooks": merge_hooks,
     "multi": multi,
     "multi-open": multi_open,
     "multi-generation": multi_generation,
+    "multi-session-generation": multi_session_generation,
     "multi-failure": multi_failure,
     "continue-fork": continue_fork,
     "dashboard": dashboard,
