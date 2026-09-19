@@ -24,7 +24,6 @@ use std::time::Duration;
 
 pub use handle::MuxHandle;
 pub use handshake::PaneHandshake;
-pub use herdr::HerdrBackend;
 pub use tmux::TmuxBackend;
 pub use types::*;
 
@@ -1117,7 +1116,7 @@ pub fn create_backend(backend_type: BackendType) -> Arc<dyn Multiplexer> {
         BackendType::WezTerm => Arc::new(wezterm::WezTermBackend::new()),
         BackendType::Kitty => Arc::new(kitty::KittyBackend::new()),
         BackendType::Zellij => Arc::new(zellij::ZellijBackend::new()),
-        BackendType::Herdr => Arc::new(HerdrBackend::new()),
+        BackendType::Herdr => Arc::new(herdr::HerdrBackend::new()),
     }
 }
 
@@ -1128,7 +1127,7 @@ pub fn create_backend_for_instance(
     match backend_type {
         BackendType::Tmux => Arc::new(TmuxBackend::for_socket(instance)),
         BackendType::Zellij => Arc::new(zellij::ZellijBackend::for_session(instance)),
-        BackendType::Herdr => Arc::new(HerdrBackend::for_socket(instance)),
+        BackendType::Herdr => Arc::new(herdr::HerdrBackend::for_socket(instance)),
         _ => create_backend(backend_type),
     }
 }
