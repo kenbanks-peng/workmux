@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Workmux — tmux, WezTerm, kitty, and Herdr</title>
+  <title>Workmux — tmux and Herdr</title>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 1200px; margin: 40px auto; padding: 0 20px; line-height: 1.45; }
+    body { max-width: 1600px; margin: 40px auto; padding: 0 20px; line-height: 1.45; }
     h1 { margin-bottom: 6px; font-size: 1.6rem; }
     p, footer { color: light-dark(#555, #bbb); font-size: .9rem; }
     .table-wrap { overflow-x: auto; }
@@ -14,7 +14,7 @@
     th, td { padding: 9px 12px; border-bottom: 1px solid light-dark(#ddd, #383838); text-align: left; }
     thead { background: light-dark(#f3f5f7, #24272b); }
     tbody th { font-weight: 500; }
-    th:nth-child(n+2):nth-child(-n+5), td:nth-child(n+2):nth-child(-n+5) { text-align: center; min-width: 64px; }
+    th:nth-child(n+2):nth-child(-n+4), td:nth-child(n+2):nth-child(-n+4) { text-align: center; min-width: 64px; }
     td:last-child { color: light-dark(#555, #bbb); }
     .yes { color: light-dark(#16713d, #73d69b); }
     .no { color: light-dark(#a52a2a, #ff9999); }
@@ -24,46 +24,47 @@
   </style>
 </head>
 <body>
-  <h1>Workmux: tmux, WezTerm, kitty, and Herdr</h1>
+  <h1>Workmux: tmux and Herdr</h1>
   <p>Workmux <code>0.1.263</code> · Herdr <code>&gt;= 0.9.0</code>, protocol <code>22</code>.</p>
   <p id="legend">✓ Supported · ✗ Not supported · ◐ Partial or requires custom configuration · ? Not verified end to end.</p>
+  <p id="coverage">% = rough estimate of Herdr functional test coverage, based on available test evidence and known gaps; not measured code coverage. Tests that confirm failures or restrictions count as tested, not supported. Estimates include gaps across options, platforms, and runtimes. Tested/Untested refer to Herdr; unconfirmed coverage is listed as untested. No new tests were run for this update.</p>
   <div class="table-wrap">
-    <table aria-describedby="legend">
-      <thead><tr><th scope="col">Functionality</th><th scope="col">tmux</th><th scope="col">WezTerm</th><th scope="col">kitty</th><th scope="col">Herdr</th><th scope="col">Comment</th></tr></thead>
+    <table aria-describedby="legend coverage">
+      <thead><tr><th scope="col">Functionality</th><th scope="col">tmux</th><th scope="col">Herdr</th><th scope="col">%</th><th scope="col">Tested</th><th scope="col">Untested</th></tr></thead>
       <tbody>
-        <tr><th scope="row">Create / open worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>Multi-worktree add/open in window mode requires a Herdr pane, except frontmatter add.</td></tr>
-        <tr><th scope="row">List worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Close / remove worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Deferred cleanup</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Session mode</th><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Pane splits / command launch</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Focus / zoom panes</th><td class="yes">✓</td><td class="unknown">◐</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Send input / capture output</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Native agent status display</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Clear status on focus</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="no">✗</td><td>Waiting/done status does not clear on focus; protocol 22 cannot reliably detect user focus.</td></tr>
-        <tr><th scope="row">Sidebar</th><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td>Workmux sidebar requires tmux.</td></tr>
-        <tr><th scope="row">Merge</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Rebase</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some rebase options remain untested.</td></tr>
-        <tr><th scope="row">Rename</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some messages incorrectly say “tmux”.</td></tr>
-        <tr><th scope="row">Resurrect</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Duplicate parent names block recovery. Partial setup requires manual cleanup and configuration repair.</td></tr>
-        <tr><th scope="row">Popup workflows / command restrictions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Popup add needs <code>--parent-session</code>. tmux popup bindings do not apply.</td></tr>
-        <tr><th scope="row">Dashboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Mouse interaction and some actions remain untested.</td></tr>
-        <tr><th scope="row">Diff actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Patch actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">PR / MR workflows</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Remote PR/MR creation, live forge access, and fork requests remain untested.</td></tr>
-        <tr><th scope="row">Multiple agents</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Multi-agent generation in window mode requires invocation from a Herdr pane; external and popup calls cannot specify a parent workspace. Real agent replay and Linux untested.</td></tr>
-        <tr><th scope="row">Continue / fork</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Real agent replay and Codex fork untested.</td></tr>
-        <tr><th scope="row">Status</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Wait</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Last-agent navigation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>External calls cannot record the return pane.</td></tr>
-        <tr><th scope="row">Run commands with output / exit tracking</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Sandbox support</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Apple Container tested; other runtimes and real agent sessions untested.</td></tr>
-        <tr><th scope="row">Host RPC</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Estimated Herdr test coverage: 3 of 8 RPC operations (38%): heartbeat, status, and title. Authentication also tested. Spawn, exec, merge, close, and clipboard remain unverified end to end.</td></tr>
-        <tr><th scope="row">Clipboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Host clipboard access and guest transfer untested.</td></tr>
-        <tr><th scope="row">Hooks</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some hook paths remain untested.</td></tr>
-        <tr><th scope="row">File sync</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Headless workflows</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>PR, prompt, fork, multi-worktree, and target options restricted.</td></tr>
+        <tr><th scope="row">Create / open worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Add/open; both modes; multiple targets; partial failures. Multi-worktree window mode requires a Herdr pane, except frontmatter add.</td><td>Full option/configuration combinations; live remote workflows.</td></tr>
+        <tr><th scope="row">List worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Worktree listing in both modes.</td><td>All filters and output formats.</td></tr>
+        <tr><th scope="row">Close / remove worktrees</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Both modes; owned-target cleanup; unrelated panes retained.</td><td>Full force/branch/target combinations.</td></tr>
+        <tr><th scope="row">Deferred cleanup</th><td class="yes">✓</td><td class="yes">✓</td><td>90%</td><td>In-pane cleanup; races; late pane insertion; stale identity.</td><td>All interruption points; Linux end to end.</td></tr>
+        <tr><th scope="row">Session mode</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Lifecycle; layouts; navigation; recovery; mode conversion.</td><td>All cross-project/configuration combinations.</td></tr>
+        <tr><th scope="row">Pane splits / command launch</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Splits; size limits; slow shell startup; literal input.</td><td>All shells and layout combinations.</td></tr>
+        <tr><th scope="row">Focus / zoom panes</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Pane focus; zoom; background focus retained.</td><td>Full multi-client and resize interactions.</td></tr>
+        <tr><th scope="row">Send input / capture output</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Literal input; captured output; missing targets.</td><td>All CLI input sources and capture limits.</td></tr>
+        <tr><th scope="row">Native agent status display</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Working/waiting/done/clear; native reports match state.</td><td>All real agent profiles; custom appearance.</td></tr>
+        <tr><th scope="row">Clear status on focus</th><td class="yes">✓</td><td class="no">✗</td><td>80%</td><td>Waiting/done does not clear on focus/open. Protocol 22 cannot reliably detect user focus.</td><td>Successful automatic clearing.</td></tr>
+        <tr><th scope="row">Sidebar</th><td class="yes">✓</td><td class="no">✗</td><td>10%</td><td>Explicit tmux-only rejection.</td><td>Rendering; navigation; layouts; settings.</td></tr>
+        <tr><th scope="row">Merge</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Conflicts; squash; hooks; retry; both-mode cleanup.</td><td>All merge-policy and remote-base combinations.</td></tr>
+        <tr><th scope="row">Rebase</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Conflicts; abort; continue; retry; both modes.</td><td>Remaining base/option combinations.</td></tr>
+        <tr><th scope="row">Rename</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Tab/workspace rename; session recovery rename. Some messages incorrectly say “tmux”.</td><td>All branch options and cross-project collisions.</td></tr>
+        <tr><th scope="row">Resurrect</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Closed targets; restart; stale identity; partial failure/retry. Duplicate parent names block recovery. Partial setup needs manual cleanup and configuration repair.</td><td>Full machine restart; real agent recovery.</td></tr>
+        <tr><th scope="row">Popup workflows / command restrictions</th><td class="yes">✓</td><td class="yes">✓</td><td>60%</td><td>Native popup caller; add with/without explicit parent. Add needs <code>--parent-session</code>; tmux popup bindings do not apply.</td><td>All popup commands and return-navigation paths.</td></tr>
+        <tr><th scope="row">Dashboard</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Render; jump; input; kill; sweep; add/close/reopen.</td><td>Mouse; remaining actions/settings.</td></tr>
+        <tr><th scope="row">Diff actions</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>File/line/hunk/comment input; commit/merge prompts (stub).</td><td>Real agent execution; all file/error types.</td></tr>
+        <tr><th scope="row">Patch actions</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Hunk split; partial staging; undo; content retained.</td><td>All revert/error paths and file types.</td></tr>
+        <tr><th scope="row">PR / MR workflows</th><td class="yes">✓</td><td class="yes">✓</td><td>50%</td><td>PR/MR checkout with forge fixtures; both modes.</td><td>Live forge access; creation; fork requests.</td></tr>
+        <tr><th scope="row">Multiple agents</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Count/agent/foreach/stdin/frontmatter; collisions; failures. Window-mode generation requires a Herdr pane; external/popup calls cannot specify a parent workspace.</td><td>Real agent replay; Linux.</td></tr>
+        <tr><th scope="row">Continue / fork</th><td class="yes">✓</td><td class="yes">✓</td><td>40%</td><td>Claude/Codex/pi resume flags; Claude fork (stubs).</td><td>Real session replay; Codex fork.</td></tr>
+        <tr><th scope="row">Status</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Registration; detached hooks; moved/stale/foreign targets.</td><td>All project filters, Git details and agent profiles.</td></tr>
+        <tr><th scope="row">Wait</th><td class="yes">✓</td><td class="yes">✓</td><td>60%</td><td>Timeout exit; working-to-done release.</td><td>Any/all combinations; dead/missing targets.</td></tr>
+        <tr><th scope="row">Last-agent navigation</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Dashboard history; two-way return; closed target. External calls cannot record the return pane.</td><td>All cross-project/session histories.</td></tr>
+        <tr><th scope="row">Run commands with output / exit tracking</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Output; nonzero exit; background completion.</td><td>Timeouts; cancellation; full artifact handling.</td></tr>
+        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="yes">✓</td><td>80%</td><td>Dry run; Ctrl-C/EOF; unresponsive agent; shell retained.</td><td>All real agents and concurrent process changes.</td></tr>
+        <tr><th scope="row">Sandbox support</th><td class="yes">✓</td><td class="yes">✓</td><td>30%</td><td>Apple Container launch; guest access; cleanup.</td><td>Other runtimes; real agent sessions.</td></tr>
+        <tr><th scope="row">Host RPC</th><td class="yes">✓</td><td class="unknown">◐</td><td>50%</td><td>4 of 8 operations: heartbeat; status; title; clipboard. Authentication also tested.</td><td>Spawn; exec; merge; close end to end.</td></tr>
+        <tr><th scope="row">Clipboard</th><td class="yes">✓</td><td class="yes">✓</td><td>60%</td><td>macOS PNG → Apple Container guest via RPC/wl-paste/xclip; error handling; temporary-file cleanup.</td><td>Linux hosts; other runtimes; size limits end to end.</td></tr>
+        <tr><th scope="row">Hooks</th><td class="yes">✓</td><td class="yes">✓</td><td>60%</td><td>Post-create; pre-remove; pre-merge failure/retry/bypass.</td><td>Remaining hook paths and shell combinations.</td></tr>
+        <tr><th scope="row">File sync</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Previously marked supported; case details not recorded.</td><td>Copy/symlink and all-worktree coverage not confirmed.</td></tr>
+        <tr><th scope="row">Headless workflows</th><td class="yes">✓</td><td class="yes">✓</td><td>70%</td><td>Headless add; later open in Herdr. PR, prompt, fork, multi-worktree and target options are restricted.</td><td>Full restricted-option and configuration combinations.</td></tr>
       </tbody>
     </table>
   </div>
