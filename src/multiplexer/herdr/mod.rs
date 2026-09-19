@@ -10,6 +10,8 @@ mod deferred_tests;
 mod deferred_unit_tests;
 #[cfg(test)]
 mod detection_tests;
+#[cfg(test)]
+mod dimensions_tests;
 mod identity;
 mod pane_launch;
 #[cfg(test)]
@@ -1189,6 +1191,18 @@ setup::impl_backend! {
         ensure!(
             (0.1..=0.9).contains(&ratio),
             "Herdr 0.9.0 limits each split to 10–90% of its target; the requested pane size cannot be preserved"
+        );
+        // A split needs at least one cell per pane. The native server can
+        // otherwise accept the split and leave one pane with zero width/height.
+        let dimensions = self.pane_dimensions(target)?;
+        let extent = if dir == "right" {
+            dimensions.width
+        } else {
+            dimensions.height
+        };
+        ensure!(
+            extent >= 2,
+            "Herdr split requires at least 2 cells on its split axis"
         );
         self.move_launch(target, cwd, command, dir, ratio, false)
     }
