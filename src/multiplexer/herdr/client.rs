@@ -136,9 +136,19 @@ fn validate_snapshot(result: &Value) -> Result<Snapshot> {
     let protocol = snapshot["protocol"]
         .as_u64()
         .context("Missing Herdr server protocol")?;
+    let version_parts = version
+        .split('.')
+        .map(|part| {
+            part.bytes()
+                .all(|byte| byte.is_ascii_digit())
+                .then(|| part.parse::<u64>().ok())
+                .flatten()
+        })
+        .collect::<Option<Vec<_>>>();
     ensure!(
-        version == "0.9.0" && protocol == 22,
-        "Unsupported Herdr server: version {version}, protocol {protocol}; expected 0.9.0 protocol 22"
+        version_parts.is_some_and(|parts| parts.len() == 3 && parts.as_slice() >= &[0, 9, 0])
+            && protocol == 22,
+        "Unsupported Herdr server: version {version}, protocol {protocol}; expected >= 0.9.0 protocol 22"
     );
     serde_json::from_value(snapshot.clone()).context("Malformed Herdr snapshot")
 }
@@ -368,6 +378,32 @@ mod tests {
     use std::thread;
 
     const SNAPSHOT: &str = "{\"id\":\"workmux\",\"result\":{\"snapshot\":{\"version\":\"0.9.0\",\"protocol\":22,\"workspaces\":[],\"tabs\":[],\"panes\":[]}}}\n";
+
+    #[test]
+    fn accepts_minimum_and_newer_versions_with_supported_protocol() {
+        for (version, accepted) in [
+            ("0.8.99", false),
+            ("0.9.0", true),
+            ("0.9.1", true),
+            ("0.10.0", true),
+            ("1.0.0", true),
+            ("invalid", false),
+            ("0.9", false),
+            ("0.9.0-rc.1", false),
+        ] {
+            for protocol in [21, 22, 23] {
+                let result = json!({"snapshot": {
+                    "version":version, "protocol":protocol,
+                    "workspaces":[], "tabs":[], "panes":[]
+                }});
+                assert_eq!(
+                    validate_snapshot(&result).is_ok(),
+                    accepted && protocol == 22,
+                    "version {version}, protocol {protocol}"
+                );
+            }
+        }
+    }
 
     fn serve(path: &Path, responses: Vec<String>) -> thread::JoinHandle<Vec<String>> {
         let listener = UnixListener::bind(path).unwrap();

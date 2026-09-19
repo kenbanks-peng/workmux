@@ -106,7 +106,12 @@ pub fn rename(
     // 7. tmux target collision check (only if handle is changing)
     let mode = git::get_worktree_mode(&old_handle);
     let attachment = git::get_worktree_attachment_in(&old_handle, Some(&context.execution_dir));
-    let old_full = prefixed(&context.prefix, &old_handle);
+    let old_target = if mode == MuxMode::Session {
+        git::get_worktree_target_session(&old_handle).unwrap_or_else(|| old_handle.clone())
+    } else {
+        old_handle.clone()
+    };
+    let old_full = prefixed(&context.prefix, &old_target);
     let new_full = prefixed(&context.prefix, &new_handle);
     let mux_running = context.mux.is_running().unwrap_or(false);
 
@@ -184,6 +189,8 @@ pub fn rename(
                 if context.mux.session_exists(&old_full).unwrap_or(false) {
                     match context.mux.rename_session(&old_full, &new_full) {
                         Ok(()) => {
+                            git::set_worktree_meta(&new_handle, "target-session", &new_handle)
+                                .context("Failed to persist renamed session target")?;
                             tmux_renamed += 1;
                             info!(old = %old_full, new = %new_full, "rename:session renamed");
                         }

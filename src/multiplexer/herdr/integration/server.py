@@ -16,7 +16,7 @@ import threading
 import time
 from pathlib import Path
 
-HERDR_VERSION = "0.9.0"
+MIN_HERDR_VERSION = (0, 9, 0)
 HERDR_PROTOCOL = 22
 
 
@@ -173,7 +173,10 @@ class HerdrServer:
         if self.closed or self.process is not None:
             raise RuntimeError("Herdr fixture is closed or already started")
         version = self.cli("--version").strip()
-        if version != f"herdr {HERDR_VERSION}":
+        if (
+            tuple(map(int, version.removeprefix("herdr ").split(".")))
+            < MIN_HERDR_VERSION
+        ):
             raise RuntimeError(f"Unsupported Herdr client: {version}")
         self.log = (self.root / "server.log").open("ab")
         try:
@@ -192,7 +195,10 @@ class HerdrServer:
             assert self.process.poll() is None, (self.root / "server.log").read_text()
             snapshot = self.request("session.snapshot")
             actual = (snapshot["snapshot"]["version"], snapshot["snapshot"]["protocol"])
-            if actual != (HERDR_VERSION, HERDR_PROTOCOL):
+            if (
+                tuple(map(int, actual[0].split("."))) < MIN_HERDR_VERSION
+                or actual[1] != HERDR_PROTOCOL
+            ):
                 raise RuntimeError(f"Unsupported Herdr server: {actual}")
             return snapshot
         except BaseException:

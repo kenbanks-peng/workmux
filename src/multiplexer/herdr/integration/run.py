@@ -214,14 +214,15 @@ def cli_smoke(server):
     run("close", "feature")
     run("open", "feature", "--parent-session", "parent")
     run("remove", "feature", "--force")
-    result = run("add", "session-rejected", "--session", success=False)
-    assert result.returncode != 0 and "only supported with tmux" in result.stderr, (
-        result
+    run("add", "session-feature", "--session", "--background")
+    assert any(
+        workspace["label"] == "wm-session-feature"
+        for workspace in server.request("session.snapshot")["snapshot"]["workspaces"]
     )
-    print(
-        "PASS CLI add/list/close/open/remove and unchanged session restriction",
-        flush=True,
-    )
+    run("close", "session-feature")
+    run("open", "session-feature")
+    run("remove", "session-feature", "--force")
+    print("PASS CLI add/list/close/open/remove in window and session modes", flush=True)
 
 
 def main():

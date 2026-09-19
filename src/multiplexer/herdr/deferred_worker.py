@@ -164,9 +164,14 @@ class Client:
     def snapshot(self):
         snapshot = self.request("session.snapshot", {}).get("snapshot")
         require(isinstance(snapshot, dict), "Malformed Herdr snapshot")
+        version = snapshot.get("version")
+        parts = version.split(".") if isinstance(version, str) else []
         require(
-            snapshot.get("version") == "0.9.0" and snapshot.get("protocol") == 22,
-            "Unsupported Herdr server; expected 0.9.0 protocol 22",
+            len(parts) == 3
+            and all(part.isascii() and part.isdecimal() for part in parts)
+            and tuple(map(int, parts)) >= (0, 9, 0)
+            and snapshot.get("protocol") == 22,
+            "Unsupported Herdr server; expected >= 0.9.0 protocol 22",
         )
         for group, fields in (
             ("workspaces", ("workspace_id", "label")),

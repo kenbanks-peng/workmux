@@ -150,6 +150,38 @@ fn deferred_worker_outlives_scheduler() {
 }
 
 #[test]
+fn deferred_version_compatibility() {
+    for (version, accepted) in [
+        ("0.8.99", false),
+        ("0.9.0", true),
+        ("0.9.1", true),
+        ("0.10.0", true),
+        ("1.0.0", true),
+        ("invalid", false),
+        ("0.9", false),
+        ("0.9.0-rc.1", false),
+    ] {
+        for protocol in [21, 22, 23] {
+            let accepted = accepted && protocol == 22;
+            let mut state = snapshot(json!([]), true);
+            state["snapshot"]["version"] = json!(version);
+            state["snapshot"]["protocol"] = json!(protocol);
+            let mut responses = vec![state];
+            if accepted {
+                responses.push(json!({}));
+            }
+            let (result, requests) = exercise(Action::FocusTab, responses, false, false);
+            assert_eq!(
+                result.is_ok(),
+                accepted,
+                "version {version}, protocol {protocol}"
+            );
+            assert_eq!(requests.len(), if accepted { 3 } else { 2 });
+        }
+    }
+}
+
+#[test]
 fn deferred_focus_uses_captured_target() {
     for action in [Action::FocusTab, Action::FocusWorkspace] {
         let (result, requests) = exercise(

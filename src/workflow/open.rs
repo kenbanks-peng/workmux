@@ -77,9 +77,9 @@ pub fn open(
         MuxMode::Session => cli_target_session_name.as_deref(),
     };
 
-    if mode == MuxMode::Session && context.mux.name() != "tmux" {
+    if mode == MuxMode::Session && !matches!(context.mux.name(), "tmux" | "herdr") {
         anyhow::bail!(
-            "Session mode (--mode session / --session) is only supported with tmux.\n\
+            "Session mode (--mode session / --session) is only supported with tmux or herdr.\n\
              Current backend: {}. Use window mode instead.",
             context.mux.name()
         );
@@ -210,6 +210,14 @@ pub fn open(
     let target_session_name = options.target_session_name.clone().or_else(|| {
         git::get_worktree_target_session_in(&base_handle, Some(&context.execution_dir))
     });
+    let target_session_name = if mode == MuxMode::Session {
+        Some(context.mux.resolve_session_open_name(
+            &context.prefix,
+            target_session_name.as_deref().unwrap_or(&base_handle),
+        )?)
+    } else {
+        target_session_name
+    };
     let window_session_name = options.window_session_name.clone().or_else(|| {
         git::get_worktree_window_session_in(&base_handle, Some(&context.execution_dir))
     });
@@ -378,7 +386,7 @@ pub fn open(
         .context("Failed to persist target window")?;
     }
     if mode == MuxMode::Session {
-        if let Some(target_session_name) = &cli_target_session_name {
+        if let Some(target_session_name) = &options.target_session_name {
             git::set_worktree_meta_in(
                 &base_handle,
                 "target-session",

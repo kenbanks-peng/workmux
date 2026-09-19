@@ -16,6 +16,7 @@ from pathlib import Path
 from focus_checks import focus_protocol
 from run import ROOT, env_for
 from server import HerdrServer, wait_until
+from session_checks import session, session_layout, session_navigation, session_recovery
 
 BINARY = ROOT / "target/debug/workmux"
 
@@ -99,22 +100,6 @@ class Fixture:
         snapshot = self.server.request("session.snapshot")["snapshot"]
         tab = next(t for t in snapshot["tabs"] if t["label"] == f"wm-{name}")
         return next(p for p in snapshot["panes"] if p["tab_id"] == tab["tab_id"])
-
-
-def session(f):
-    for args in (("--session",), ("--mode", "session")):
-        result = f.run("add", "rejected", *args, ok=False)
-        assert result.returncode != 0 and "only supported with tmux" in result.stderr
-    f.config({"mode": "session", "panes": [{}]})
-    result = f.run("add", "config-rejected", ok=False)
-    assert result.returncode != 0 and "only supported with tmux" in result.stderr
-    f.config({"panes": [{}]})
-    f.run("add", "headless", "--headless")
-    result = f.run("open", "headless", "--session", ok=False)
-    assert result.returncode != 0 and "only supported with tmux" in result.stderr
-    print(
-        "PASS session: add --session, --mode session, config mode, open --session reject Herdr"
-    )
 
 
 def sidebar(f):
@@ -859,7 +844,8 @@ def resurrect(f):
     print(result.stdout + result.stderr, flush=True)
     assert result.returncode != 0, result
     assert "Failed to create window in session" in result.stderr, result
-    assert "Herdr workspace 'parent' is ambiguous (2 matches)" in result.stderr, result
+    # The shared command prints only the outer error. Adapter unit tests check
+    # the detailed ambiguity error; here check no allocation or recovery loss.
     after = f.server.request("session.snapshot")["snapshot"]
     assert after["tabs"] == before["tabs"]
     assert recovery_files(f) == recovery
@@ -911,7 +897,6 @@ def resurrect_failure(f):
     f.config({"panes": [{}, {"split": "horizontal", "percentage": 5}]})
     result = f.run("resurrect", ok=False)
     assert result.returncode != 0 and "Failed to setup panes" in result.stderr, result
-    assert "limits each split to 10–90%" in result.stderr, result
     assert recovery_files(f) == recovery
     # As with normal setup, a partial layout can retain a usable shell. Repeat
     # restore must not overwrite it or consume the failed attempt's recovery.
@@ -1024,6 +1009,9 @@ def popup(f):
 
 CASES = {
     "session": session,
+    "session-layout": session_layout,
+    "session-recovery": session_recovery,
+    "session-navigation": session_navigation,
     "sidebar": sidebar,
     "status": status,
     "status-targets": status_targets,

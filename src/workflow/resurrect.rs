@@ -159,7 +159,8 @@ pub fn plan(store: &StateStore, mux: &dyn Multiplexer) -> Result<ResurrectPlan> 
             };
             let prefixed = crate::multiplexer::util::prefixed(prefix, &target_name);
             let is_open = if mode == MuxMode::Session {
-                mux_sessions.contains(&prefixed)
+                let open_name = mux.resolve_session_open_name(prefix, &target_name)?;
+                mux_sessions.contains(&crate::multiplexer::util::prefixed(prefix, &open_name))
             } else if mux.supports_window_ownership() {
                 match git::get_worktree_window_token(&handle) {
                     Some(token) => !mux

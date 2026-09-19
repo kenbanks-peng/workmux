@@ -265,6 +265,13 @@ pub trait Multiplexer: Send + Sync {
         Ok(false)
     }
 
+    /// Resolve the unprefixed target when reopening a worktree session.
+    /// Backends that restore unowned layouts may choose a free name instead.
+    /// This must be read-only: resurrection planning also calls it.
+    fn resolve_session_open_name(&self, _prefix: &str, name: &str) -> Result<String> {
+        Ok(name.to_string())
+    }
+
     /// Kill a session by its full name (including prefix).
     fn kill_session(&self, _full_name: &str) -> Result<()> {
         Ok(())

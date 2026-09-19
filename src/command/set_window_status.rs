@@ -54,7 +54,10 @@ impl StatusTarget {
             .ok_or_else(|| anyhow::anyhow!("{} is missing", STATUS_TARGET_BACKEND_ENV))?
             .parse::<BackendType>()
             .map_err(anyhow::Error::msg)?;
-        if !matches!(backend, BackendType::Tmux | BackendType::Zellij) {
+        if !matches!(
+            backend,
+            BackendType::Tmux | BackendType::Zellij | BackendType::Herdr
+        ) {
             return Err(anyhow::anyhow!(
                 "status targets do not support the {} backend",
                 backend

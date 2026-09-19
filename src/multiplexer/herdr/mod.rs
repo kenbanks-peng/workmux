@@ -12,6 +12,9 @@ mod deferred_unit_tests;
 mod detection_tests;
 mod identity;
 mod pane_launch;
+mod session;
+#[cfg(test)]
+mod session_tests;
 mod setup;
 #[cfg(test)]
 mod setup_tests;
@@ -977,6 +980,9 @@ setup::impl_backend! {
         }
         Ok(snapshot.workspaces.iter().any(|w| w.label == name))
     }
+    fn resolve_session_open_name(&self, prefix: &str, name: &str) -> Result<String> {
+        self.session_open_name(prefix, name)
+    }
     fn switch_to_session(&self, prefix: &str, name: &str) -> Result<()> {
         self.client.request(
             "workspace.focus",
@@ -1021,9 +1027,15 @@ setup::impl_backend! {
         Ok(())
     }
     fn rename_session(&self, old: &str, new: &str) -> Result<()> {
+        let workspace = self.session(old)?;
+        ensure!(
+            self.workspace_owned(&workspace.workspace_id)?,
+            "Refusing to rename an unowned Herdr workspace"
+        );
+        ensure!(!self.session_exists(new)?, "Herdr workspace '{new}' already exists");
         self.client.request(
             "workspace.rename",
-            json!({"workspace_id":self.session(old)?.workspace_id,"label":new}),
+            json!({"workspace_id":workspace.workspace_id,"label":new}),
         )?;
         Ok(())
     }
