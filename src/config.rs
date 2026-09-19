@@ -15,6 +15,39 @@ use which::{which, which_in};
 /// making the workmux remove command return almost instantly.
 const NODE_MODULES_CLEANUP_SCRIPT: &str = include_str!("scripts/cleanup_node_modules.sh");
 
+/// Names of lockfiles that mark a directory as a Node.js package.
+const NODE_LOCKFILES: [&str; 3] = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"];
+
+/// Whether `root` or any of its immediate subdirectories contains a Node.js
+/// lockfile.
+///
+/// Monorepos often keep the lockfile in a package directory (`dashboard/`,
+/// `frontend/`) rather than at the root, so a root-only check would miss them.
+/// The search stops at depth 1 and skips hidden directories and `node_modules`
+/// to keep the cost to a handful of directory reads.
+fn has_node_lockfile(root: &Path) -> bool {
+    fn has_lockfile_in(dir: &Path) -> bool {
+        NODE_LOCKFILES.iter().any(|name| dir.join(name).is_file())
+    }
+
+    if has_lockfile_in(root) {
+        return true;
+    }
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "node_modules" {
+            return false;
+        }
+        entry.file_type().is_ok_and(|t| t.is_dir()) && has_lockfile_in(&entry.path())
+    })
+}
+
 /// Configuration for file operations during worktree creation
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct FileConfig {
@@ -2553,9 +2586,7 @@ impl Config {
         }
 
         if !defaults_root.as_os_str().is_empty() {
-            let has_node_modules = defaults_root.join("pnpm-lock.yaml").exists()
-                || defaults_root.join("package-lock.json").exists()
-                || defaults_root.join("yarn.lock").exists();
+            let has_node_modules = has_node_lockfile(defaults_root);
 
             if config.panes.is_none() && config.windows.is_none() {
                 if defaults_root.join("CLAUDE.md").exists() || has_explicit_agent {
@@ -3272,6 +3303,7 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # Commands to run before worktree removal (during merge or remove).
 # Useful for backing up gitignored files before cleanup.
 # Default: Auto-detects Node.js projects and fast-deletes node_modules.
+# Detection looks for a lockfile at the project root or in a direct subdirectory.
 # Use "<global>" to inherit from global config.
 # Set to empty list to disable: `pre_remove: []`
 # Environment variables available:
@@ -3490,11 +3522,11 @@ mod tests {
     use super::{
         AgentColumn, AgentEnvValue, AgentIconConfig, AgentIconDetails, AllowedDomainDetails,
         AllowedDomainEntry, Config, ContainerConfig, ContainerDevice, DEFAULT_AGENT_COLUMNS,
-        DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig, LayoutConfig, LimaConfig, NetworkConfig,
-        NetworkPolicy, PaneConfig, SandboxConfig, SandboxRuntime, SandboxTarget, SidebarHeight,
-        SidebarPosition, SidebarWidth, SplitDirection, ToolchainMode, WindowPlacement,
-        WorktreeColumn, is_agent_command, validate_domain, validate_group_add_entry,
-        validate_layouts_config,
+        DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig, LayoutConfig, LimaConfig,
+        NODE_MODULES_CLEANUP_SCRIPT, NetworkConfig, NetworkPolicy, PaneConfig, SandboxConfig,
+        SandboxRuntime, SandboxTarget, SidebarHeight, SidebarPosition, SidebarWidth,
+        SplitDirection, ToolchainMode, WindowPlacement, WorktreeColumn, is_agent_command,
+        validate_domain, validate_group_add_entry, validate_layouts_config,
     };
     use crate::test_support;
     use tempfile::TempDir;
@@ -3991,6 +4023,74 @@ mod tests {
 
         let disabled: Config = serde_yaml::from_str("merge_keep: false").unwrap();
         assert_eq!(disabled.merge_keep, Some(false));
+    }
+
+    fn pre_remove_default_for_root(root: &std::path::Path) -> Option<Vec<String>> {
+        Config::merge_and_apply_defaults(Config::default(), Config::default(), None, root)
+            .unwrap()
+            .pre_remove
+    }
+
+    #[test]
+    fn node_modules_cleanup_detects_lockfile_at_root() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("pnpm-lock.yaml"), "").unwrap();
+
+        assert_eq!(
+            pre_remove_default_for_root(root.path()),
+            Some(vec![NODE_MODULES_CLEANUP_SCRIPT.to_string()])
+        );
+    }
+
+    #[test]
+    fn node_modules_cleanup_detects_lockfile_in_subdirectory() {
+        let root = tempfile::tempdir().unwrap();
+        let dashboard = root.path().join("dashboard");
+        std::fs::create_dir(&dashboard).unwrap();
+        std::fs::write(dashboard.join("pnpm-lock.yaml"), "").unwrap();
+
+        assert_eq!(
+            pre_remove_default_for_root(root.path()),
+            Some(vec![NODE_MODULES_CLEANUP_SCRIPT.to_string()])
+        );
+    }
+
+    #[test]
+    fn node_modules_cleanup_ignores_lockfiles_below_depth_one() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("packages").join("app");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("yarn.lock"), "").unwrap();
+
+        assert_eq!(pre_remove_default_for_root(root.path()), None);
+    }
+
+    #[test]
+    fn node_modules_cleanup_ignores_lockfiles_in_hidden_dirs_and_node_modules() {
+        let root = tempfile::tempdir().unwrap();
+        for dir in [".cache", "node_modules"] {
+            let dir = root.path().join(dir);
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("package-lock.json"), "").unwrap();
+        }
+
+        assert_eq!(pre_remove_default_for_root(root.path()), None);
+    }
+
+    #[test]
+    fn node_modules_cleanup_does_not_override_configured_pre_remove() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("yarn.lock"), "").unwrap();
+        let project = Config {
+            pre_remove: Some(vec![]),
+            ..Default::default()
+        };
+
+        let config =
+            Config::merge_and_apply_defaults(Config::default(), project, None, root.path())
+                .unwrap();
+
+        assert_eq!(config.pre_remove, Some(vec![]));
     }
 
     #[test]

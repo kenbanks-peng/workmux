@@ -2536,7 +2536,9 @@ Note: In large monorepos, cleaning up `node_modules` during worktree removal can
 take significant time. workmux has a
 [special cleanup mechanism](https://github.com/raine/workmux/blob/main/src/scripts/cleanup_node_modules.sh)
 that moves `node_modules` to a temporary location and deletes it in the
-background, making the `remove` command return almost instantly.
+background, making the `remove` command return almost instantly. It is enabled
+automatically when a lockfile (`pnpm-lock.yaml`, `package-lock.json`, or
+`yarn.lock`) exists at the project root or in a direct subdirectory.
 
 ### Rust projects
 
