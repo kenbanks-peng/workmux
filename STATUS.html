@@ -42,14 +42,14 @@
         <tr><th scope="row">Native agent status display</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Clear status on focus</th><td class="yes">✓</td><td class="no">✗</td><td class="unknown">◐</td><td class="no">✗</td><td>Protocol 22 cannot reliably detect user focus. Waiting/done status does not clear on focus.</td></tr>
         <tr><th scope="row">Sidebar</th><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td>Workmux sidebar requires tmux.</td></tr>
-        <tr><th scope="row">Merge</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Session-mode conflicts and squash tested, including cleanup after a successful merge.</td></tr>
-        <tr><th scope="row">Rebase</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Session-mode conflict, abort, continue, and retry tested. Other rebase options not fully tested.</td></tr>
+        <tr><th scope="row">Merge</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
+        <tr><th scope="row">Rebase</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some rebase options are not fully tested.</td></tr>
         <tr><th scope="row">Rename</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Some messages incorrectly say “tmux”.</td></tr>
         <tr><th scope="row">Resurrect</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td>Duplicate parent names block recovery. After partial setup, close the partial layout and fix configuration before retry.</td></tr>
         <tr><th scope="row">Popup workflows / command restrictions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Popup add needs <code>--parent-session</code>. tmux popup bindings do not apply.</td></tr>
         <tr><th scope="row">Dashboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Actions other than Enter-to-focus are not fully tested.</td></tr>
         <tr><th scope="row">Diff actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Patch actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>WIP diffs only. Split, selective staging, and undo tested.</td></tr>
+        <tr><th scope="row">Patch actions</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">PR / MR creation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Remote PR/MR creation untested; requires external tools.</td></tr>
         <tr><th scope="row">Multiple agents</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Count, multiple-agent, foreach, and stdin generation reject <code>--parent-session</code>. Real agent replay and Linux untested.</td></tr>
         <tr><th scope="row">Continue / fork</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Real agent replay and Codex fork untested.</td></tr>
@@ -57,7 +57,7 @@
         <tr><th scope="row">Wait</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
         <tr><th scope="row">Last-agent navigation</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>External calls cannot record the return pane.</td></tr>
         <tr><th scope="row">Run commands with output / exit tracking</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="yes">✓</td><td></td></tr>
-        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Ctrl-D fallback tested; the shell remains usable after agent exit. Unresponsive agents untested.</td></tr>
+        <tr><th scope="row">Agent reaping</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">◐</td><td>Unresponsive agents untested.</td></tr>
         <tr><th scope="row">Sandbox support</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Real guest launch and Herdr identity routing unverified.</td></tr>
         <tr><th scope="row">Host RPC</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Guest-to-Herdr status and identity routing unverified.</td></tr>
         <tr><th scope="row">Clipboard</th><td class="yes">✓</td><td class="unknown">?</td><td class="unknown">?</td><td class="unknown">?</td><td>Host clipboard access and guest transfer unverified.</td></tr>
