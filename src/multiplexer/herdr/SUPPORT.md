@@ -18,8 +18,9 @@ WORKMUX_BACKEND=herdr HERDR_SOCKET_PATH=/absolute/path/herdr.sock \
 
 All Herdr platform code and integration tests are in this directory. The deferred
 worker requires no shared command dispatch. `src/cli.rs` and `src/command/` match
-main. Shared backend registration, multiplexer launch lifecycle hooks, and capture
-changes remain outside this directory; this is not yet full folder isolation.
+main. Only backend registration and an environment-detection call remain in
+shared source. The shared setup method matches main exactly. It has no Herdr
+launch guards, lifecycle hooks, or status conditions.
 The restored command checks reject Herdr status targets and explicit parents for
 multiple worktrees. Earlier status and multi-worktree results below are historical,
 not current support claims. These constraints supersede the earlier shared-interface
@@ -32,6 +33,24 @@ fail before pane allocation. Only fresh workmux panes can be replaced for launch
 Live layout replacement is not used. Launches read ownership from the live
 destination terminal, not a cached tab record. A replacement retains the primary
 ownership flag; an added split does not inherit that flag.
+
+`setup.rs` owns the setup scope. Setup calls are serialized on each adapter.
+The scope is a private `Multiplexer` adapter. It inherits the unchanged shared
+`setup_panes` default and forwards primitives to the real backend. The local
+`impl_backend!` macro defines each primitive once and generates both implementations.
+Only the real backend overrides `setup_panes`; the scope must not forward that
+method, or setup would recurse. New primitive overrides are forwarded automatically.
+No setup algorithm or second list of primitive signatures is copied here.
+On success or failure, the scope cancels its undelivered commands and clears its
+pending handshake. It preserves commands that were already delivered and launches
+that existed before the scope. It releases an unchanged initial shell and ends its
+replacement permission, including after a setup error. Release errors on success
+are returned to the caller. Cleanup during error handling is best effort.
+
+Status identity is set inside every controlled launch shell, including non-agent
+commands. This lets shell builtins and compound commands inherit the same identity.
+It does not change input sent to an existing terminal. Herdr detection rules also
+live here; nested multiplexer precedence is unchanged.
 
 Immediate and deferred cleanup match tmux: window cleanup uses `tab.close`,
 and session cleanup uses `workspace.close`. All panes in the target close,

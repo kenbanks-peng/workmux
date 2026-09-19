@@ -1,15 +1,20 @@
 //! Herdr 0.9.0 / protocol 22: workmux sessions are workspaces, windows are tabs.
 //! Public focus is native broadcast focus. No implicit endpoint or last-focus fallback.
-mod client;
-mod deferred;
 #[cfg(test)]
 mod cleanup_tests;
+mod client;
+mod deferred;
 #[cfg(test)]
 mod deferred_tests;
 #[cfg(test)]
 mod deferred_unit_tests;
+#[cfg(test)]
+mod detection_tests;
 mod identity;
 mod pane_launch;
+mod setup;
+#[cfg(test)]
+mod setup_tests;
 #[cfg(test)]
 mod tests;
 
@@ -52,6 +57,7 @@ pub struct HerdrBackend {
     // Only freshly allocated panes in this operation may be replaced for launch.
     fresh: Mutex<HashSet<String>>,
     pending_launch: Mutex<Option<Arc<pane_launch::Launch>>>,
+    setup_lock: Mutex<()>,
     launch_directory: Mutex<Option<tempfile::TempDir>>,
     initial_launches: Mutex<HashMap<String, Arc<pane_launch::Launch>>>,
     launches: Mutex<HashMap<String, Arc<pane_launch::Launch>>>,
@@ -72,6 +78,7 @@ impl HerdrBackend {
             client: Client::new(endpoint),
             fresh: Mutex::new(HashSet::new()),
             pending_launch: Mutex::new(None),
+            setup_lock: Mutex::new(()),
             launch_directory: Mutex::new(None),
             initial_launches: Mutex::new(HashMap::new()),
             launches: Mutex::new(HashMap::new()),
@@ -729,6 +736,23 @@ impl HerdrBackend {
     }
 }
 
+/// Preserve nested multiplexer precedence; Herdr replaces only the tmux fallback.
+pub(super) fn detect_fallback(detected: BackendType) -> BackendType {
+    detect_backend_with_signals(
+        detected,
+        std::env::var_os("TMUX").is_some(),
+        std::env::var_os("HERDR_SOCKET_PATH").is_some(),
+    )
+}
+
+fn detect_backend_with_signals(detected: BackendType, tmux: bool, herdr: bool) -> BackendType {
+    if detected == BackendType::Tmux && !tmux && herdr {
+        BackendType::Herdr
+    } else {
+        detected
+    }
+}
+
 impl Drop for HerdrBackend {
     fn drop(&mut self) {
         // A successful creation without setup is still a usable shell. On
@@ -739,7 +763,25 @@ impl Drop for HerdrBackend {
     }
 }
 
-impl Multiplexer for HerdrBackend {
+setup::impl_backend! {
+    fn setup_panes(
+        &self,
+        initial_pane_id: &str,
+        panes: &[PaneConfig],
+        working_dir: &Path,
+        options: PaneSetupOptions<'_>,
+        config: &Config,
+        task_agent: Option<&str>,
+    ) -> Result<PaneSetupResult> {
+        let _lock = self.setup_lock.lock().unwrap();
+        let setup = setup::Setup::new(self, initial_pane_id);
+        let result = setup.setup_panes(
+            initial_pane_id, panes, working_dir, options, config, task_agent,
+        )?;
+        setup.finish()?;
+        Ok(result)
+    }
+
     fn name(&self) -> &'static str {
         "herdr"
     }
@@ -1061,7 +1103,7 @@ impl Multiplexer for HerdrBackend {
     fn select_pane(&self, p: &str) -> Result<()> {
         self.pane_op(p, "pane.focus")
     }
-    fn switch_to_pane(&self, p: &str, _: Option<&str>) -> Result<()> {
+    fn switch_to_pane(&self, p: &str, _session: Option<&str>) -> Result<()> {
         self.select_pane(p)
     }
     fn zoom_pane(&self, p: &str) -> Result<()> {
@@ -1142,25 +1184,6 @@ impl Multiplexer for HerdrBackend {
         Ok(Box::new(pane_launch::Handshake::new(launch)))
     }
 
-    fn cancel_pane_launch(&self, key: &str) -> Result<()> {
-        if let Some(launch) = self.launches.lock().unwrap().remove(key) {
-            launch.cancel();
-            if let Ok(pane) = self.pane(key) {
-                self.client
-                    .request("pane.close", json!({"pane_id":pane.pane_id}))?;
-            }
-        }
-        Ok(())
-    }
-    fn finish_pane_setup(&self, pane_ids: &[String]) -> Result<()> {
-        for key in pane_ids {
-            self.fresh.lock().unwrap().remove(key);
-            if let Some(launch) = self.initial_launches.lock().unwrap().remove(key) {
-                launch.release()?;
-            }
-        }
-        Ok(())
-    }
     fn clear_pane(&self, key: &str) -> Result<()> {
         self.pane(key)?;
         self.launches
@@ -1233,7 +1256,7 @@ impl Multiplexer for HerdrBackend {
     fn send_keys(&self, p: &str, text: &str) -> Result<()> {
         let launch = self.launches.lock().unwrap().get(p).cloned();
         if let Some(launch) = launch {
-            launch.deliver(text)?;
+            launch.deliver_to_pane(text, &self.instance_id(), p)?;
             self.launches.lock().unwrap().remove(p);
             return Ok(());
         }
@@ -1321,7 +1344,7 @@ impl Multiplexer for HerdrBackend {
         );
         self.deferred_command(deferred::Action::CloseTab, id)
     }
-    fn shell_close_session_by_id_guard_cmd(&self, id: &str, _: Option<&str>) -> Result<String> {
+    fn shell_close_session_by_id_guard_cmd(&self, id: &str, _pane: Option<&str>) -> Result<String> {
         let workspace_id = self.raw(id)?;
         ensure!(
             self.client

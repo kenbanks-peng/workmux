@@ -52,6 +52,8 @@ def probe(binary, server, name, variables):
         module = "deferred_tests"
     elif name in {"isolated_cleanup_race", "isolated_launch_ownership"}:
         module = "cleanup_tests"
+    elif name == "isolated_setup_lifetime":
+        module = "setup_tests"
     result = subprocess.run(
         [
             str(binary),
@@ -267,6 +269,8 @@ def main():
             client = server.attach()
             wait_until(lambda client=client: client.output)
             probe(binary, server, name, {variable: str(server.socket_path)})
+    with ExitStack() as stack:
+        probe(binary, own(stack), "isolated_setup_lifetime", {})
     with ExitStack() as stack:
         probe(binary, own(stack), "isolated_launch_ownership", {})
     for mode in [

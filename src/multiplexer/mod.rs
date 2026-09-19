@@ -33,21 +33,6 @@ pub const STATUS_TARGET_BACKEND_ENV: &str = "WORKMUX_STATUS_BACKEND";
 pub const STATUS_TARGET_INSTANCE_ENV: &str = "WORKMUX_STATUS_INSTANCE";
 pub const STATUS_TARGET_PANE_ENV: &str = "WORKMUX_STATUS_PANE_ID";
 
-/// Cancel a backend's undelivered command if shared preparation fails.
-struct PaneLaunchGuard<'a, M: Multiplexer + ?Sized> {
-    backend: &'a M,
-    pane: &'a str,
-    armed: bool,
-}
-
-impl<M: Multiplexer + ?Sized> Drop for PaneLaunchGuard<'_, M> {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = self.backend.cancel_pane_launch(self.pane);
-        }
-    }
-}
-
 fn command_with_status_target(
     command: &str,
     backend: &str,
@@ -628,16 +613,6 @@ pub trait Multiplexer: Send + Sync {
         util::unix_pipe_handshake()
     }
 
-    /// Cancel an undelivered controlled command, if the backend uses one.
-    fn cancel_pane_launch(&self, _pane_id: &str) -> Result<()> {
-        Ok(())
-    }
-
-    /// Release backend launch resources once pane setup is complete.
-    fn finish_pane_setup(&self, _pane_ids: &[String]) -> Result<()> {
-        Ok(())
-    }
-
     // === Status ===
 
     /// Set status icon for a pane.
@@ -682,7 +657,6 @@ pub trait Multiplexer: Send + Sync {
         task_agent: Option<&str>,
     ) -> Result<PaneSetupResult> {
         if panes.is_empty() {
-            self.finish_pane_setup(&[initial_pane_id.to_string()])?;
             return Ok(PaneSetupResult {
                 focus_pane_id: initial_pane_id.to_string(),
                 zoom_pane_id: None,
@@ -738,11 +712,6 @@ pub trait Multiplexer: Send + Sync {
                     )?
                 };
 
-                let mut launch_guard = PaneLaunchGuard {
-                    backend: self,
-                    pane: &spawned_id,
-                    armed: true,
-                };
                 handshake.wait()?;
 
                 // Inject resume/continue arguments for agent panes when requested
@@ -846,7 +815,7 @@ pub trait Multiplexer: Send + Sync {
                     resolved.render_command()
                 };
 
-                let final_command = if is_agent_pane && matches!(self.name(), "zellij" | "herdr") {
+                let final_command = if is_agent_pane && self.name() == "zellij" {
                     command_with_status_target(
                         &final_command,
                         self.name(),
@@ -859,8 +828,6 @@ pub trait Multiplexer: Send + Sync {
 
                 let _ = self.clear_pane(&spawned_id);
                 self.send_keys(&spawned_id, &final_command)?;
-                launch_guard.armed = false;
-                drop(launch_guard);
 
                 // Set working status for agent panes with injected prompts
                 if resolved.prompt_injected
@@ -917,7 +884,6 @@ pub trait Multiplexer: Send + Sync {
             }
         }
 
-        self.finish_pane_setup(&pane_ids)?;
         Ok(PaneSetupResult {
             focus_pane_id: focus_pane_id.unwrap_or_else(|| pane_ids[0].clone()),
             zoom_pane_id,
@@ -1078,14 +1044,7 @@ fn detect_backend_from_environment() -> BackendType {
             || std::env::var("ZELLIJ_SESSION_NAME").is_ok(),
         std::env::var("KITTY_WINDOW_ID").is_ok(),
     );
-    if detected == BackendType::Tmux
-        && std::env::var_os("TMUX").is_none()
-        && std::env::var_os("HERDR_SOCKET_PATH").is_some()
-    {
-        BackendType::Herdr
-    } else {
-        detected
-    }
+    herdr::detect_fallback(detected)
 }
 
 /// Pure auto-detection logic, separated for testability.

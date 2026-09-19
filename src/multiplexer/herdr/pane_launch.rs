@@ -55,6 +55,38 @@ impl Launch {
     pub fn cancel(&self) {
         let _ = std::fs::write(self.directory.path().join("cancel"), "");
     }
+    /// Set identity in the controlled shell, not by prefixing `env` to a
+    /// command: configured commands can contain shell builtins or compound lists.
+    pub fn deliver_to_pane(&self, command: &str, instance: &str, pane: &str) -> Result<()> {
+        self.deliver(&self.command_with_identity(command, instance, pane)?)
+    }
+    fn command_with_identity(&self, command: &str, instance: &str, pane: &str) -> Result<String> {
+        use super::super::{
+            STATUS_TARGET_BACKEND_ENV, STATUS_TARGET_INSTANCE_ENV, STATUS_TARGET_PANE_ENV,
+        };
+        let mut script = String::new();
+        for (name, value) in [
+            (STATUS_TARGET_BACKEND_ENV, "herdr"),
+            (STATUS_TARGET_INSTANCE_ENV, instance),
+            (STATUS_TARGET_PANE_ENV, pane),
+        ] {
+            if self.is_nu() {
+                script.push_str(&format!(
+                    "$env.{name} = {}\n",
+                    serde_json::to_string(value)?
+                ));
+            } else if Path::new(&self.shell)
+                .file_name()
+                .is_some_and(|s| s == "fish")
+            {
+                script.push_str(&format!("set -gx {name} {}\n", shell_quote(value)));
+            } else {
+                script.push_str(&format!("export {name}={}\n", shell_quote(value)));
+            }
+        }
+        script.push_str(command);
+        Ok(script)
+    }
     pub fn deliver(&self, command: &str) -> Result<()> {
         ensure!(
             !self.directory.path().join("cancel").exists(),
@@ -241,5 +273,47 @@ impl Drop for Handshake {
         if !self.ready {
             self.launch.cancel();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_identity_preserves_shell_commands_and_quotes() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let instance = "/tmp/socket 'with spaces' $HOME;雪";
+        let pane = "boot~terminal's-id";
+        for shell in ["/bin/sh", "/bin/bash", "/bin/zsh", "fish", "nu"] {
+            if std::process::Command::new(shell)
+                .arg("--version")
+                .output()
+                .is_err()
+            {
+                continue;
+            }
+            let launch = Launch::new(shell, directory.path())?;
+            let command = if shell == "nu" {
+                "cd /; print $env.WORKMUX_STATUS_BACKEND; print $env.WORKMUX_STATUS_INSTANCE; print $env.WORKMUX_STATUS_PANE_ID; pwd"
+            } else {
+                "cd /; printf '%s\\n' \"$WORKMUX_STATUS_BACKEND\" \"$WORKMUX_STATUS_INSTANCE\" \"$WORKMUX_STATUS_PANE_ID\"; pwd"
+            };
+            let script = launch.command_with_identity(command, instance, pane)?;
+            let output = std::process::Command::new(shell)
+                .args(["-c", &script])
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{shell}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout)?,
+                format!("herdr\n{instance}\n{pane}\n/\n"),
+                "{shell}"
+            );
+        }
+        Ok(())
     }
 }
