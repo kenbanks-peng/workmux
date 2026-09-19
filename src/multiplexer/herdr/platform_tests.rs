@@ -1,4 +1,6 @@
 //! Adapter contract tests. These do not establish real-server acceptance.
+#[path = "capture_contract_tests.rs"]
+mod capture_contract_tests;
 use super::*;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};

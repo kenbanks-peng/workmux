@@ -1,6 +1,8 @@
 //! Herdr 0.9.0 / protocol 22: workmux sessions are workspaces, windows are tabs.
 //! Public focus is native broadcast focus. No implicit endpoint or last-focus fallback.
 #[cfg(test)]
+mod capture_tests;
+#[cfg(test)]
 mod cleanup_tests;
 mod client;
 mod deferred;
