@@ -1750,7 +1750,7 @@ Useful for monitoring multiple parallel agents and quickly jumping between them.
 | `Enter`   | Go to selected agent (closes dashboard) |
 | `j`/`k`   | Navigate up/down                        |
 | `:`       | Open command palette                    |
-| `q`/`Esc` | Quit                                    |
+| `q`       | Quit                                    |
 
 #### Mouse controls
 

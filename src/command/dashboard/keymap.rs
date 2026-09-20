@@ -327,21 +327,31 @@ mod tests {
     #[test]
     fn test_dashboard_quit_keys() {
         let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
 
-        assert_eq!(
-            action_for_key(Context::DashboardNormal, q),
-            Some(Action::Quit)
-        );
-        assert_eq!(
-            action_for_key(Context::DashboardNormal, esc),
-            Some(Action::Quit)
-        );
-        assert_eq!(
-            action_for_key(Context::DashboardNormal, ctrl_c),
-            Some(Action::Quit)
-        );
+        for ctx in [Context::DashboardNormal, Context::WorktreeNormal] {
+            for key in [q, ctrl_c] {
+                assert_eq!(action_for_key(ctx, key), Some(Action::Quit), "{ctx:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_escape_dismisses_modes_without_quitting() {
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+        for (ctx, expected) in [
+            (Context::DashboardNormal, None),
+            (Context::WorktreeNormal, None),
+            (Context::DashboardInput, Some(Action::ExitInputMode)),
+            (Context::DashboardFilter, Some(Action::ClearFilter)),
+            (Context::WorktreeFilter, Some(Action::ClearFilter)),
+            (Context::DiffNormal, Some(Action::CloseDiff)),
+            (Context::Patch, Some(Action::ExitPatchMode)),
+            (Context::Comment, Some(Action::CancelComment)),
+        ] {
+            assert_eq!(action_for_key(ctx, esc), expected, "{ctx:?}");
+        }
     }
 
     #[test]
