@@ -65,6 +65,24 @@ a foreground supervisor, and grouped shell output. These were test fixture
 errors, not product defects. No production files changed. The final and
 repeat runs have no failing or skipped cases.
 
+## Combined branch validation before final integration
+
+Merged `herdr` at `dd9e4538` into this branch without conflicts. Combined
+commit tested: `80614b30`. All other agents' changes were retained. The only
+STATUS.html edit is the Guest-to-host RPC operations row in Table 2.
+
+| Exact command | Combined result |
+| --- | --- |
+| `CARGO_BUILD_JOBS=1 cargo test multiplexer::herdr::` | Exit 0: 71 passed, 0 failed, 22 ignored, 0 measured, 1730 filtered out; 4.20 seconds. |
+| `CARGO_BUILD_JOBS=1 cargo fmt --check` | Exit 0; no output. |
+| `CARGO_BUILD_JOBS=1 cargo build --quiet` | Exit 0; rebuilt the combined binary for the Python suite. |
+| `python3 src/multiplexer/herdr/integration/guest_rpc_checks.py -v` | Exit 0: 5 passed in 10.244 seconds; no failures or skips. |
+
+The Rust filter does not run ignored live-server tests or the full Rust test
+suite. The Python suite uses private live Herdr instances and the controlled
+launcher described above. Broad pre-merge hooks are intentionally skipped
+for the authorized final Workmux merge. No full-suite pass is claimed.
+
 ## Remaining gaps and proposed table cells
 
 Real container/VM execution of these four operations remains untested. This
