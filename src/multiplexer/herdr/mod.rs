@@ -1,6 +1,8 @@
 //! Herdr 0.9.0 / protocol 22: workmux sessions are workspaces, windows are tabs.
 //! Public focus is native broadcast focus. No implicit endpoint or last-focus fallback.
 #[cfg(test)]
+mod caller_tests;
+#[cfg(test)]
 mod cleanup_tests;
 mod client;
 mod deferred;
@@ -10,10 +12,20 @@ mod deferred_tests;
 mod deferred_unit_tests;
 #[cfg(test)]
 mod detection_tests;
+#[cfg(test)]
+mod dimensions_tests;
 mod identity;
+#[cfg(test)]
+mod inventory_tests;
+#[cfg(test)]
+mod label_tests;
+#[cfg(test)]
+mod ownership_interruption_tests;
 mod pane_launch;
 #[cfg(test)]
 mod platform_tests;
+#[cfg(test)]
+mod remote_detection_tests;
 mod session;
 #[cfg(test)]
 mod session_tests;
@@ -1191,6 +1203,18 @@ setup::impl_backend! {
         ensure!(
             (0.1..=0.9).contains(&ratio),
             "Herdr 0.9.0 limits each split to 10–90% of its target; the requested pane size cannot be preserved"
+        );
+        // A split needs at least one cell per pane. The native server can
+        // otherwise accept the split and leave one pane with zero width/height.
+        let dimensions = self.pane_dimensions(target)?;
+        let extent = if dir == "right" {
+            dimensions.width
+        } else {
+            dimensions.height
+        };
+        ensure!(
+            extent >= 2,
+            "Herdr split requires at least 2 cells on its split axis"
         );
         self.move_launch(target, cwd, command, dir, ratio, false)
     }
