@@ -1,21 +1,24 @@
 //! Adapter contract tests. These do not establish real-server acceptance.
 #[path = "capture_contract_tests.rs"]
 mod capture_contract_tests;
+#[path = "process_metadata_tests.rs"]
+mod process_metadata_tests;
+
 use super::*;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::sync::mpsc;
 
-struct Probe {
+pub(super) struct Probe {
     _directory: tempfile::TempDir,
-    backend: HerdrBackend,
+    pub(super) backend: HerdrBackend,
     stop: mpsc::Sender<()>,
     server: thread::JoinHandle<Vec<Value>>,
 }
 
 impl Probe {
-    fn new(steps: Vec<(&str, Value, Option<Value>)>) -> Self {
+    pub(super) fn new(steps: Vec<(&str, Value, Option<Value>)>) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("api.sock");
         let listener = UnixListener::bind(&path).unwrap();
@@ -73,7 +76,7 @@ impl Probe {
         }
     }
 
-    fn finish(self) {
+    pub(super) fn finish(self) {
         self.stop.send(()).unwrap();
         assert!(
             self.server.join().unwrap().is_empty(),
@@ -82,7 +85,7 @@ impl Probe {
     }
 }
 
-fn snapshot() -> Value {
+pub(super) fn snapshot() -> Value {
     json!({"version":"0.9.0", "protocol":22,
         "workspaces":[{"workspace_id":"w1","label":"session"}],
         "tabs":[{"workspace_id":"w1","tab_id":"t1","label":"window"}],
@@ -90,7 +93,7 @@ fn snapshot() -> Value {
             "terminal_id":"term1","focused":false,"cwd":"/old"}]})
 }
 
-fn snap(value: Value) -> (&'static str, Value, Option<Value>) {
+pub(super) fn snap(value: Value) -> (&'static str, Value, Option<Value>) {
     (
         "session.snapshot",
         json!({}),
