@@ -5,6 +5,9 @@ description: A persistent agent status sidebar for tmux windows
 
 import Screenshot from "../../../../components/Screenshot.astro";
 import screenshot from "../../../../assets/screenshots/sidebar.webp";
+import tiles from "../../../../assets/screenshots/sidebar-tiles.webp";
+import grouped from "../../../../assets/screenshots/sidebar-grouped.webp";
+import topBar from "../../../../assets/screenshots/sidebar-top-bar.webp";
 
 The sidebar provides an always-visible agent overview pinned to the left edge or
 top edge of every tmux window. Unlike the dashboard, which is a full-screen TUI
@@ -12,7 +15,12 @@ you open on demand, the sidebar stays on screen while you work.
 
 <div style="display: flex; justify-content: center; margin: 1.5rem 0;">
 
-<Screenshot src={screenshot} alt="workmux sidebar" framed={false} />
+<Screenshot
+  src={screenshot}
+  alt="workmux sidebar"
+  caption="The sidebar pinned to the left of a tmux window, beside an agent"
+  framed={false}
+/>
 
 </div>
 
@@ -111,6 +119,13 @@ sidebar:
       - "{pane_title}"
 ```
 
+<Screenshot
+  src={topBar}
+  alt="workmux sidebar as a horizontal top bar"
+  caption="The horizontal top bar, one chip per agent across three rows"
+  framed={false}
+/>
+
 Width defaults to 10% of terminal width, clamped between 25 and 50 columns.
 When set explicitly, the clamp is removed (minimum 10 columns). Widths above
 80 columns use the default width so tmux pane expansion recovers automatically.
@@ -126,6 +141,13 @@ The left sidebar supports two layout modes, toggled with `v`:
 
 - **Tiles** (default): variable-height cards with status stripe
 - **Compact**: single line per agent
+
+<Screenshot
+  src={tiles}
+  alt="Tile layout, one flat list"
+  caption="Tile layout, a card per agent, with stale ones dimmed"
+  framed={false}
+/>
 
 Tiles show a muted `↓ N more` footer when agents remain below the visible area.
 The count includes only hidden agents, not agents above the viewport. The footer
@@ -158,6 +180,13 @@ repository or one per tmux session. It is off by default:
 sidebar:
   group_by: project # or session
 ```
+
+<Screenshot
+  src={grouped}
+  alt="Sidebar grouped by project, with stale agents folded"
+  caption="Grouped by project, with each section counting its agents and folding away the stale ones"
+  framed={false}
+/>
 
 Sections are alphabetical and keep their place while agents change status, so a
 row only ever moves within its own group. `sort` decides the order inside a
