@@ -25,10 +25,16 @@ use crate::state::StateStore;
 use super::app::{SidebarFilterMode, SidebarLayoutMode};
 use super::snapshot::{CheckPathEntry, PrPathEntry, build_snapshot};
 
-/// Compute socket path from instance_id.
+/// Compute the socket path for a multiplexer instance.
 pub fn socket_path(instance_id: &str) -> PathBuf {
-    let safe_id = instance_id.replace(['/', '\\'], "-");
-    std::env::temp_dir().join(format!("workmux-sidebar-{}.sock", safe_id))
+    // FNV-1a provides a stable fixed-width key across the controller and daemon
+    // while keeping long tmux socket paths below Unix socket limits.
+    let mut key = 0xcbf29ce484222325u64;
+    for byte in instance_id.as_bytes() {
+        key ^= u64::from(*byte);
+        key = key.wrapping_mul(0x100000001b3);
+    }
+    std::env::temp_dir().join(format!("workmux-sidebar-{key:016x}.sock"))
 }
 
 /// Result of a batched tmux query.
@@ -2539,6 +2545,42 @@ mod tests {
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
         run_git(path, &["init", "-q"]);
+    }
+
+    #[test]
+    fn socket_path_uses_a_stable_fixed_width_instance_key() {
+        let default = socket_path("/private/tmp/tmux-501/default");
+        let long = socket_path("/private/tmp/tmux-501/sidebar-repro-socket");
+        let unicode = socket_path("/private/tmp/tmux-501/サイドバー");
+
+        assert_eq!(default.parent(), Some(std::env::temp_dir().as_path()));
+        assert_eq!(
+            default.file_name().unwrap(),
+            "workmux-sidebar-3d3d4a9387e30f49.sock"
+        );
+        assert_eq!(
+            long.file_name().unwrap(),
+            "workmux-sidebar-51c46e2d6ee045f1.sock"
+        );
+        assert_eq!(
+            unicode.file_name().unwrap(),
+            "workmux-sidebar-b596df9918d556c8.sock"
+        );
+    }
+
+    #[test]
+    fn socket_path_for_a_long_instance_can_be_bound() {
+        let unique = tempfile::tempdir().unwrap();
+        let instance_id = format!(
+            "/private/tmp/tmux-501/{}/{}",
+            unique.path().display(),
+            "long-unicode-name-サイドバー".repeat(8)
+        );
+        let path = socket_path(&instance_id);
+
+        let listener = UnixListener::bind(&path).unwrap();
+        drop(listener);
+        std::fs::remove_file(path).unwrap();
     }
 
     fn working_agent(pane_id: &str, updated_ts: u64) -> AgentPane {
