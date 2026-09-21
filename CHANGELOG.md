@@ -23,6 +23,13 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 
 ## Unreleased
 
+## v0.1.264 (2026-09-21)
+
+- Add an opt-in `window` column to the dashboard's agent table for showing tmux window indexes. ([#227](https://github.com/raine/workmux/pull/227))
+- Show more of long worktree and branch names when the dashboard has room. ([#281](https://github.com/raine/workmux/pull/281))
+- Keep the dashboard open when `Esc` is pressed in its main views; use `q` or `Ctrl+C` to quit. ([#104](https://github.com/raine/workmux/pull/104))
+- Install shell completions automatically with Homebrew. ([#284](https://github.com/raine/workmux/pull/284))
+- Fix the sidebar failing to start on macOS when long temporary or custom tmux socket paths exceed Unix socket limits. ([#293](https://github.com/raine/workmux/issues/293))
 - Keep Pi panes marked as working throughout automatic compaction when delegated activity tracking is enabled, preserving the elapsed timer until the continuation finishes.
 - Enable the fast `node_modules` cleanup on worktree removal in monorepos where the lockfile lives in a subdirectory, such as `dashboard/pnpm-lock.yaml`, instead of only at the project root.
 - Keep the fast `node_modules` cleanup when a project defines its own `pre_remove` commands by listing `"<cleanup-node-modules>"` among them. Previously any `pre_remove` entry replaced the cleanup entirely. See the [lifecycle hooks guide](https://workmux.raine.dev/guide/configuration#lifecycle-hooks)
