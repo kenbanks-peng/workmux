@@ -726,7 +726,7 @@ enum Commands {
         window: Option<String>,
     },
 
-    /// Reflow sidebar layouts in all windows (internal use, called by tmux hooks)
+    /// Reflow sidebar layouts in all windows (internal use)
     #[command(hide = true, name = "_sidebar-reflow-all")]
     SidebarReflowAll {
         /// Exclude this window ID from reflow (e.g. the window that just lost a pane)

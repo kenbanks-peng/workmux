@@ -885,7 +885,6 @@ impl SidebarApp {
                     self.pending_resize_cols = None;
                     self.pending_resize_rows = None;
                     self.resize_deadline = None;
-                    let _ = super::reflow_all_to_window_extent(Some(window_w), None);
                     return;
                 }
                 self.pending_resize_cols = Some(cols);
@@ -897,7 +896,6 @@ impl SidebarApp {
                     self.pending_resize_cols = None;
                     self.pending_resize_rows = None;
                     self.resize_deadline = None;
-                    let _ = super::reflow_all_to_window_extent(Some(window_h), None);
                     return;
                 }
                 self.pending_resize_rows = Some(rows);

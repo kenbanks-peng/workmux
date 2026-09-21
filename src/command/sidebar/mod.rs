@@ -422,17 +422,8 @@ pub(super) fn reflow_all_sidebars_except(exclude_window_id: &str) {
     }
 }
 
-/// Reflow sidebar layouts in all windows. Called by the window-resized hook
-/// so inactive windows get their sidebar widths corrected without waiting for
-/// the user to visit them.
+/// Reflow sidebar layouts in all windows.
 pub fn reflow_all(exclude_window: Option<&str>) -> Result<()> {
-    reflow_all_to_window_extent(None, exclude_window)
-}
-
-pub(super) fn reflow_all_to_window_extent(
-    window_extent: Option<u16>,
-    exclude_window: Option<&str>,
-) -> Result<()> {
     let scope = current_scope();
     if matches!(scope, SidebarScope::Off) {
         return Ok(());
@@ -457,15 +448,12 @@ pub(super) fn reflow_all_to_window_extent(
             SidebarPosition::Left => "#{window_width}",
             SidebarPosition::Top => "#{window_height}",
         };
-        let current_extent = match window_extent {
-            Some(extent) => extent,
-            None => Cmd::new("tmux")
-                .args(&["display-message", "-t", &window_id, "-p", format])
-                .run_and_capture_stdout()
-                .ok()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(0),
-        };
+        let current_extent = Cmd::new("tmux")
+            .args(&["display-message", "-t", &window_id, "-p", format])
+            .run_and_capture_stdout()
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
         if current_extent == 0 {
             continue;
         }
@@ -474,13 +462,7 @@ pub(super) fn reflow_all_to_window_extent(
             SidebarPosition::Left => resolve_width_for(&config, current_extent, synced_width),
             SidebarPosition::Top => resolve_height_for(&config, current_extent, synced_height),
         };
-        layout_tree::reflow_after_sidebar_add_to_window_extent(
-            &window_id,
-            &pane_id,
-            position,
-            size,
-            window_extent,
-        );
+        layout_tree::reflow_after_sidebar_add(&window_id, &pane_id, position, size);
     }
 
     Ok(())
