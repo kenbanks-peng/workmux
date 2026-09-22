@@ -112,8 +112,8 @@ sidebar:
       - "{pane_title}"
 ```
 
-Explicit width values bypass the default 25-50 column clamp (minimum 10
-columns). Layout preference can also be toggled at runtime with `v` and is
+Explicit width values bypass the default 25-50 column clamp (minimum 1
+column). Layout preference can also be toggled at runtime with `v` and is
 persisted across restarts. Height only applies to `position: top`; set it as a
 row count for the number of horizontal lines you want to show. The top bar uses a
 horizontal chip layout, so `v` has no effect there. Horizontal templates render

@@ -257,7 +257,7 @@ pub(super) fn width_exceeds_defensive_max(width: u16) -> bool {
 /// Priority: explicit config > synced (persisted resize) > default (10%).
 fn resolve_width_for(config: &crate::config::Config, tw: u16, synced_width: Option<u16>) -> u16 {
     if let Some(ref w) = config.sidebar.width {
-        let width = w.resolve(tw).max(10);
+        let width = w.resolve(tw).max(1);
         return if width_exceeds_defensive_max(width) {
             default_width_for(tw)
         } else {
@@ -268,8 +268,8 @@ fn resolve_width_for(config: &crate::config::Config, tw: u16, synced_width: Opti
     if let Some(w) = synced_width
         && !width_exceeds_defensive_max(w)
     {
-        let max_w = tw.saturating_sub(10).max(10);
-        return w.clamp(10, max_w);
+        let max_w = tw.saturating_sub(10).max(1);
+        return w.clamp(1, max_w);
     }
 
     default_width_for(tw)
@@ -1243,10 +1243,43 @@ mod tests {
     }
 
     #[test]
+    fn resolve_width_preserves_narrow_explicit_widths() {
+        let mut config = crate::config::Config::default();
+        for (width, expected) in [(0, 1), (1, 1), (8, 8)] {
+            config.sidebar.width = Some(crate::config::SidebarWidth::Absolute(width));
+            assert_eq!(resolve_width_for(&config, 200, Some(40)), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_width_preserves_narrow_synced_widths() {
+        let config = crate::config::Config::default();
+        for (width, expected) in [(0, 1), (1, 1), (8, 8)] {
+            assert_eq!(resolve_width_for(&config, 200, Some(width)), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_width_preserves_narrow_percentages() {
+        let mut config = crate::config::Config::default();
+        config.sidebar.width = Some(crate::config::SidebarWidth::Percent(4));
+        assert_eq!(resolve_width_for(&config, 200, None), 8);
+        assert_eq!(resolve_width_for(&config, 20, None), 1);
+    }
+
+    #[test]
+    fn resolve_width_reserves_content_space_in_small_windows() {
+        let config = crate::config::Config::default();
+        for (window, expected) in [(18, 8), (15, 5), (11, 1), (10, 1), (0, 1)] {
+            assert_eq!(resolve_width_for(&config, window, Some(8)), expected);
+        }
+    }
+
+    #[test]
     fn resolve_width_clamps_synced_to_window() {
         let config = crate::config::Config::default();
         assert_eq!(resolve_width_for(&config, 60, Some(80)), 50);
-        assert_eq!(resolve_width_for(&config, 200, Some(5)), 10);
+        assert_eq!(resolve_width_for(&config, 200, Some(5)), 5);
     }
 
     #[test]
