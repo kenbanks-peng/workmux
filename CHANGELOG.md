@@ -23,6 +23,9 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 
 ## Unreleased
 
+- New! Group the sidebar by project or tmux session, off by default. See the [sidebar guide](https://workmux.raine.dev/guide/sidebar/#grouping).
+- Show the pull request number beside its check status in the sidebar's default templates.
+
 ## v0.1.264 (2026-09-21)
 
 - Add an opt-in `window` column to the dashboard's agent table for showing tmux window indexes. ([#227](https://github.com/raine/workmux/pull/227))
