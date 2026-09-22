@@ -1019,9 +1019,12 @@ impl SidebarApp {
     fn rebuild_jump_numbers(&mut self) {
         let mut numbers = vec![None; self.agents.len()];
         let mut next = 0;
+        // Grouping sorts stale agents into a tail it offers to fold, so the
+        // hotkeys skip them there. A flat list numbers everything it draws.
+        let skip_stale = self.group_by.is_some();
         for row in &self.rows {
             if let SidebarRow::Agent(idx) = row
-                && !self.stale_pane_ids.contains(&self.agents[*idx].pane_id)
+                && !(skip_stale && self.stale_pane_ids.contains(&self.agents[*idx].pane_id))
             {
                 numbers[*idx] = Some(next);
                 next += 1;
@@ -2686,9 +2689,10 @@ mod grouping_tests {
             ],
         ));
 
-        // Every agent is drawn, but only the live one is worth a hotkey.
+        // Every agent is drawn, and a flat list numbers all of them: it has no
+        // stale tail to sort them into and no fold to hide them behind.
         assert_eq!(app.rows, vec![SidebarRow::Agent(0), SidebarRow::Agent(1)]);
-        assert_eq!(app.jump_numbers, vec![Some(0), None]);
+        assert_eq!(app.jump_numbers, vec![Some(0), Some(1)]);
         app.select_first();
         assert_eq!(app.selected_group(), None);
     }

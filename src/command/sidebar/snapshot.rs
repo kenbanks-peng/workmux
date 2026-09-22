@@ -258,13 +258,16 @@ pub(crate) fn order_agents(
 
 /// Whether an agent can be reached by `workmux sidebar next|prev|jump <N>`.
 ///
-/// Jumping is for reaching work in progress. A stale agent is one nobody is
-/// waiting on, so it is not a target, whether the sidebar folded it away or
-/// draws it in plain sight under a live one. The pane list behind those
-/// commands and the numbers the rows carry answer the same question, or a
-/// hotkey lands somewhere other than the row wearing its number.
+/// A grouped sidebar sorts each group's stale agents into a tail and offers to
+/// fold it away, so it already treats them as work nobody is waiting on:
+/// jumping skips them there, folded or not. A flat list makes no such
+/// distinction, so every agent it shows keeps its number.
+///
+/// The pane list behind those commands and the numbers the rows carry answer
+/// the same question, or a hotkey lands somewhere other than the row wearing
+/// its number.
 pub fn is_jump_target(snapshot: &SidebarSnapshot, agent: &AgentPane) -> bool {
-    !snapshot.stale_pane_ids.contains(&agent.pane_id)
+    snapshot.group_by.is_none() || !snapshot.stale_pane_ids.contains(&agent.pane_id)
 }
 
 /// Inputs for one snapshot build.
@@ -518,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn jumping_reaches_live_agents_only() {
+    fn grouping_takes_stale_agents_out_of_the_hotkeys() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -537,8 +540,8 @@ mod tests {
         assert!(is_jump_target(&snapshot, &live));
         assert!(!is_jump_target(&snapshot, &idle));
 
-        // Staleness decides on its own. Showing the agent, by expanding its
-        // group, turning folding off, grouping off, or drawing the top bar,
+        // While grouped, staleness decides on its own: showing the agent, by
+        // expanding its group, turning folding off, or drawing the top bar,
         // does not make it worth a hotkey.
         snapshot.expanded_groups = vec!["api".to_string()];
         assert!(!is_jump_target(&snapshot, &idle));
@@ -546,8 +549,11 @@ mod tests {
         assert!(!is_jump_target(&snapshot, &idle));
         snapshot.position = SidebarPosition::Top;
         assert!(!is_jump_target(&snapshot, &idle));
+
+        // A flat list has no stale tail and no fold, so it numbers everything
+        // it draws.
         snapshot.group_by = None;
-        assert!(!is_jump_target(&snapshot, &idle));
+        assert!(is_jump_target(&snapshot, &idle));
         assert!(is_jump_target(&snapshot, &live));
     }
 

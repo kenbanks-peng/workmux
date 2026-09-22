@@ -270,11 +270,12 @@ tmux collapses them again. A collapsed group still lists the agent of the
 window its sidebar sits in, so the sidebar never hides where you are, and the
 toggle counts only what stays folded.
 
-Stale agents are not jump targets: `{idx}` and `{jump_key}` skip them,
-`workmux sidebar next|prev|jump <N>` passes over them, and the numbers close up
-rather than leaving gaps. That holds wherever they are drawn, folded away or
-sitting under a live agent, so what `Alt+1` reaches does not change with the
-number of idle agents above it. Select them with `j`/`k` or click them instead.
+While grouped, stale agents are not jump targets: `{idx}` and `{jump_key}` skip
+them, `workmux sidebar next|prev|jump <N>` passes over them, and the numbers
+close up rather than leaving gaps. That holds whether they are folded away or
+shown, so what `Alt+1` reaches does not change with the number of idle agents
+above it. Select them with `j`/`k` or click them instead. A flat list numbers
+every agent it shows.
 
 ## Mouse support
 
