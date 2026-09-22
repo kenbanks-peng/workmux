@@ -62,7 +62,16 @@ pub fn render_worktree_table(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 wt.handle.clone()
             };
-            let worktree_display = truncate(&worktree_display, worktree_max_width);
+            let worktree_display = if app.removals.contains(&wt.path) {
+                let frames = super::super::spinner::SPINNER_FRAMES;
+                let spinner = frames[app.spinner_frame as usize % frames.len()];
+                format!(
+                    "{spinner} Deleting {}",
+                    truncate(&worktree_display, worktree_max_width.saturating_sub(11))
+                )
+            } else {
+                truncate(&worktree_display, worktree_max_width)
+            };
 
             // Git status
             let git_status = app.git_statuses.get(&wt.path);

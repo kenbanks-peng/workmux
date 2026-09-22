@@ -134,6 +134,7 @@ pub struct App {
     pub worktree_sort_mode: WorktreeSortMode,
     /// Pending worktree removal (shown in confirmation modal)
     pub pending_remove: Option<RemovePlan>,
+    pub removals: WorktreeRemovals,
     /// Pending bulk sweep state (shown in sweep modal)
     pub pending_sweep: Option<SweepState>,
     /// Pending project picker state (shown in project picker modal)
@@ -276,6 +277,7 @@ impl App {
             worktree_filter_active: false,
             worktree_sort_mode: WorktreeSortMode::load(),
             pending_remove: None,
+            removals: WorktreeRemovals::default(),
             pending_sweep: None,
             pending_project_picker: None,
             pending_base_picker: None,
