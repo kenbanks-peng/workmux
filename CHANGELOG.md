@@ -21,6 +21,10 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
+## v0.1.266 (2026-09-22)
+
+- Allow sidebar widths as narrow as one column for compact icon-only layouts, preserving widths below 10 columns when configured or resized. ([#297](https://github.com/raine/workmux/issues/297))
+
 ## v0.1.265 (2026-09-22)
 
 - New! Group the sidebar by project or tmux session and fold away stale agents, off by default. See the [sidebar guide](https://workmux.raine.dev/guide/sidebar/#grouping).
