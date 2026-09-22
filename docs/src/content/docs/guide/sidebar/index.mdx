@@ -137,7 +137,8 @@ toggle the sidebar off and on. Use `workmux sidebar --position top` or
 
 ## Layout modes
 
-The left sidebar supports two layout modes, toggled with `v`:
+The left sidebar supports two layout modes, toggled with `v` in the sidebar
+pane:
 
 - **Tiles** (default): variable-height cards with status stripe
 - **Compact**: single line per agent
@@ -201,7 +202,8 @@ until the next group's header replaces it.
 Headers are drawn in the left sidebar only. With `position: top`, `group_by`
 still orders the chips.
 
-Press `t` to switch between grouped and flat, or use the command line:
+With the sidebar pane focused, press `t` to switch between grouped and flat.
+From anywhere, use the command line:
 
 ```bash
 workmux sidebar group          # Toggle between grouped and flat
@@ -281,6 +283,9 @@ the list. Requires `set -g mouse on` in your `~/.tmux.conf`.
 
 ## Keybindings
 
+These keys belong to the sidebar pane, so they work while it has focus. Move to
+it the way you move to any tmux pane, or click it.
+
 | Key     | Action                    |
 | ------- | ------------------------- |
 | `j`/`k` | Navigate up/down          |
@@ -298,9 +303,9 @@ the list. Requires `set -g mouse on` in your `~/.tmux.conf`.
 
 ### Session filter
 
-By default, the sidebar shows agents across all tmux sessions. Press `f` to
-show only agents in the same tmux session as the current window; press `f` again
-to return to all sessions.
+By default, the sidebar shows agents across all tmux sessions. With the sidebar
+focused, press `f` to show only agents in the same tmux session as the current
+window; press `f` again to return to all sessions.
 
 The filter also applies to agent navigation hotkeys (`next`/`prev`/`jump`), so
 `Alt+j`/`Alt+k` cycle through the current session when the session filter is
@@ -316,7 +321,7 @@ workmux sidebar filter none     # Show all agents (no filter)
 
 ### Sleeping agents
 
-Press `z` to manually mark an agent as sleeping. Sleeping agents show a 💤 icon
+Select an agent in the sidebar and press `z` to mark it as sleeping. Sleeping agents show a 💤 icon
 with dimmed colors and are pushed to the bottom of the list, regardless of their
 actual status. Under `group_by` they sink to the bottom of their own group.
 `sort: window` is the exception: it keeps every agent in window order, sleeping
