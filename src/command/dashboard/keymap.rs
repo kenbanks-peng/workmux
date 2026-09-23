@@ -34,7 +34,7 @@ pub fn action_for_key(ctx: Context, key: KeyEvent) -> Option<Action> {
 fn dashboard_normal_key(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Char('?') => Some(Action::ShowHelp),
-        KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
+        KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Next),
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -89,7 +89,7 @@ fn dashboard_filter_key(key: KeyEvent) -> Option<Action> {
 fn worktree_normal_key(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Char('?') => Some(Action::ShowHelp),
-        KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
+        KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Tab => Some(Action::SwitchTab),
         KeyCode::Char('j') | KeyCode::Down => Some(Action::WorktreeNext),
@@ -199,7 +199,7 @@ pub fn help_rows(ctx: Context) -> Vec<(&'static str, &'static str)> {
     match ctx {
         Context::DashboardNormal => vec![
             ("?", "Show help"),
-            ("q/Esc", "Quit"),
+            ("q", "Quit"),
             ("j/k/C-n/C-p", "Navigate up/down"),
             ("Enter", "Jump to agent"),
             ("Tab", "Switch view"),
@@ -233,7 +233,7 @@ pub fn help_rows(ctx: Context) -> Vec<(&'static str, &'static str)> {
         ],
         Context::WorktreeNormal => vec![
             ("?", "Show help"),
-            ("q/Esc", "Quit"),
+            ("q", "Quit"),
             ("j/k/C-n/C-p", "Navigate up/down"),
             ("Enter", "Jump to worktree"),
             ("Tab", "Switch to agents"),
@@ -327,21 +327,31 @@ mod tests {
     #[test]
     fn test_dashboard_quit_keys() {
         let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
 
-        assert_eq!(
-            action_for_key(Context::DashboardNormal, q),
-            Some(Action::Quit)
-        );
-        assert_eq!(
-            action_for_key(Context::DashboardNormal, esc),
-            Some(Action::Quit)
-        );
-        assert_eq!(
-            action_for_key(Context::DashboardNormal, ctrl_c),
-            Some(Action::Quit)
-        );
+        for ctx in [Context::DashboardNormal, Context::WorktreeNormal] {
+            for key in [q, ctrl_c] {
+                assert_eq!(action_for_key(ctx, key), Some(Action::Quit), "{ctx:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_escape_dismisses_modes_without_quitting() {
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+        for (ctx, expected) in [
+            (Context::DashboardNormal, None),
+            (Context::WorktreeNormal, None),
+            (Context::DashboardInput, Some(Action::ExitInputMode)),
+            (Context::DashboardFilter, Some(Action::ClearFilter)),
+            (Context::WorktreeFilter, Some(Action::ClearFilter)),
+            (Context::DiffNormal, Some(Action::CloseDiff)),
+            (Context::Patch, Some(Action::ExitPatchMode)),
+            (Context::Comment, Some(Action::CancelComment)),
+        ] {
+            assert_eq!(action_for_key(ctx, esc), expected, "{ctx:?}");
+        }
     }
 
     #[test]

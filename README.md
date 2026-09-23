@@ -326,15 +326,34 @@ panes:
 
 Each pane supports:
 
-| Option       | Description                                                    | Default |
-| ------------ | -------------------------------------------------------------- | ------- |
-| `name`       | Pane display name (currently applied by the Zellij backend)    | —       |
-| `command`    | Command to run (see [agent placeholders](#agent-placeholders)) | Shell   |
-| `focus`      | Whether this pane receives focus                               | `false` |
-| `zoom`       | Zoom pane to fullscreen (implies `focus: true`)                | `false` |
-| `split`      | Split direction (`horizontal` or `vertical`)                   | —       |
-| `size`       | Absolute size in lines/cells                                   | 50%     |
-| `percentage` | Size as percentage (1-100)                                     | 50%     |
+| Option       | Description                                                                  | Default          |
+| ------------ | ---------------------------------------------------------------------------- | ---------------- |
+| `name`       | Pane display name (currently applied by the Zellij backend)                  | ---              |
+| `command`    | Command to run (see [agent placeholders](#agent-placeholders))               | Shell            |
+| `focus`      | Whether this pane receives focus                                             | `false`          |
+| `zoom`       | Zoom pane to fullscreen (implies `focus: true`)                              | `false`          |
+| `split`      | Split direction (`horizontal` or `vertical`)                                 | ---              |
+| `size`       | Absolute size in lines/cells                                                 | 50%              |
+| `percentage` | Size as percentage (1-100)                                                   | 50%              |
+| `target`     | 0-based pane index to split from; defaults to most recent pane               | most recent pane |
+
+Use `target` when you want to split something other than the pane that was just
+created. The target must reference an earlier pane in the same layout.
+
+```yaml
+panes:
+  - command: nvim
+    focus: true
+  - command: pnpm install && pnpm run dev
+    split: vertical
+    size: 15
+  - command: <agent>
+    split: horizontal
+    target: 0
+```
+
+This creates three panes: `nvim` is at the top left, the agent is to its right,
+and the dev server spans the bottom.
 
 ##### Agent placeholders
 
@@ -448,6 +467,16 @@ post_create:
 
 pre_merge:
   - just check
+```
+
+In Node.js projects, `pre_remove` defaults to a fast `node_modules` cleanup, and
+defining your own commands replaces that default. Use
+`"<cleanup-node-modules>"` to keep it:
+
+```yaml
+pre_remove:
+  - cp -r test-results/ "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE/"
+  - "<cleanup-node-modules>"
 ```
 
 #### Agent status icons
@@ -1721,7 +1750,7 @@ Useful for monitoring multiple parallel agents and quickly jumping between them.
 | `Enter`   | Go to selected agent (closes dashboard) |
 | `j`/`k`   | Navigate up/down                        |
 | `:`       | Open command palette                    |
-| `q`/`Esc` | Quit                                    |
+| `q`       | Quit                                    |
 
 #### Mouse controls
 
@@ -2536,7 +2565,10 @@ Note: In large monorepos, cleaning up `node_modules` during worktree removal can
 take significant time. workmux has a
 [special cleanup mechanism](https://github.com/raine/workmux/blob/main/src/scripts/cleanup_node_modules.sh)
 that moves `node_modules` to a temporary location and deletes it in the
-background, making the `remove` command return almost instantly.
+background, making the `remove` command return almost instantly. It is enabled
+automatically when a lockfile (`pnpm-lock.yaml`, `package-lock.json`, or
+`yarn.lock`) exists at the project root or in a direct subdirectory. You can also
+request it explicitly with `"<cleanup-node-modules>"` in `pre_remove`.
 
 ### Rust projects
 

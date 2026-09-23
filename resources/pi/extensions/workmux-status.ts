@@ -85,10 +85,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     if (!sessionActive) return;
-    parentWorking = !ctx.isIdle();
+    const wasAborted = latestAssistantWasAborted(ctx);
+    parentWorking = !ctx.isIdle() || wasAborted;
     if (activeCount !== undefined) {
       await reportActivity();
-    } else if (!latestAssistantWasAborted(ctx)) {
+    } else if (!wasAborted) {
       await setStatus("done");
     }
   });

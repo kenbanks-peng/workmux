@@ -755,6 +755,7 @@ impl HerdrBackend {
                 .map(|t| t.label.clone()),
             session_id: Some(self.key(&p.workspace_id)?),
             window_id: Some(self.key(&p.tab_id)?),
+            window_index: None,
         })
     }
 }
