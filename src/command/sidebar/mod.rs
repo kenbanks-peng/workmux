@@ -257,7 +257,7 @@ pub(super) fn width_exceeds_defensive_max(width: u16) -> bool {
 /// Priority: explicit config > synced (persisted resize) > default (10%).
 fn resolve_width_for(config: &crate::config::Config, tw: u16, synced_width: Option<u16>) -> u16 {
     if let Some(ref w) = config.sidebar.width {
-        let width = w.resolve(tw).max(10);
+        let width = w.resolve(tw).max(1);
         return if width_exceeds_defensive_max(width) {
             default_width_for(tw)
         } else {
@@ -268,8 +268,8 @@ fn resolve_width_for(config: &crate::config::Config, tw: u16, synced_width: Opti
     if let Some(w) = synced_width
         && !width_exceeds_defensive_max(w)
     {
-        let max_w = tw.saturating_sub(10).max(10);
-        return w.clamp(10, max_w);
+        let max_w = tw.saturating_sub(10).max(1);
+        return w.clamp(1, max_w);
     }
 
     default_width_for(tw)
@@ -422,17 +422,8 @@ pub(super) fn reflow_all_sidebars_except(exclude_window_id: &str) {
     }
 }
 
-/// Reflow sidebar layouts in all windows. Called by the window-resized hook
-/// so inactive windows get their sidebar widths corrected without waiting for
-/// the user to visit them.
+/// Reflow sidebar layouts in all windows.
 pub fn reflow_all(exclude_window: Option<&str>) -> Result<()> {
-    reflow_all_to_window_extent(None, exclude_window)
-}
-
-pub(super) fn reflow_all_to_window_extent(
-    window_extent: Option<u16>,
-    exclude_window: Option<&str>,
-) -> Result<()> {
     let scope = current_scope();
     if matches!(scope, SidebarScope::Off) {
         return Ok(());
@@ -457,15 +448,12 @@ pub(super) fn reflow_all_to_window_extent(
             SidebarPosition::Left => "#{window_width}",
             SidebarPosition::Top => "#{window_height}",
         };
-        let current_extent = match window_extent {
-            Some(extent) => extent,
-            None => Cmd::new("tmux")
-                .args(&["display-message", "-t", &window_id, "-p", format])
-                .run_and_capture_stdout()
-                .ok()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(0),
-        };
+        let current_extent = Cmd::new("tmux")
+            .args(&["display-message", "-t", &window_id, "-p", format])
+            .run_and_capture_stdout()
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
         if current_extent == 0 {
             continue;
         }
@@ -474,13 +462,7 @@ pub(super) fn reflow_all_to_window_extent(
             SidebarPosition::Left => resolve_width_for(&config, current_extent, synced_width),
             SidebarPosition::Top => resolve_height_for(&config, current_extent, synced_height),
         };
-        layout_tree::reflow_after_sidebar_add_to_window_extent(
-            &window_id,
-            &pane_id,
-            position,
-            size,
-            window_extent,
-        );
+        layout_tree::reflow_after_sidebar_add(&window_id, &pane_id, position, size);
     }
 
     Ok(())
@@ -906,6 +888,98 @@ fn read_sidebar_filter_mode() -> app::SidebarFilterMode {
     app::SidebarFilterMode::default()
 }
 
+/// Grouping accepted by the runtime override. `none` is the ungrouped list the
+/// sidebar had before grouping existed.
+pub(crate) fn parse_sidebar_group_by(raw: &str) -> Result<Option<crate::config::SidebarGroupBy>> {
+    match raw.trim().to_lowercase().as_str() {
+        "none" | "off" | "flat" => Ok(None),
+        "project" => Ok(Some(crate::config::SidebarGroupBy::Project)),
+        "session" => Ok(Some(crate::config::SidebarGroupBy::Session)),
+        other => bail!("invalid sidebar grouping {other:?}; expected none, project or session"),
+    }
+}
+
+pub(crate) fn group_by_option_value(
+    group_by: Option<crate::config::SidebarGroupBy>,
+) -> &'static str {
+    match group_by {
+        None | Some(crate::config::SidebarGroupBy::None) => "none",
+        Some(crate::config::SidebarGroupBy::Project) => "project",
+        Some(crate::config::SidebarGroupBy::Session) => "session",
+    }
+}
+
+/// Set sidebar grouping from CLI. With no mode, toggles between the configured
+/// grouping and a flat list. With `clear`, drops the runtime choice so the
+/// config file decides again.
+///
+/// A runtime choice outlives the session that made it, so without a way back
+/// an editor's `group_by` would silently stop taking effect.
+pub fn set_group_by(mode: Option<&str>, clear: bool) -> Result<()> {
+    let configured = crate::config::Config::load(None)
+        .map(|cfg| cfg.sidebar.group_by())
+        .unwrap_or_default();
+
+    let new_mode = if clear {
+        None
+    } else {
+        match mode {
+            Some(m) => Some(parse_sidebar_group_by(m)?),
+            None => Some(match read_sidebar_group_by(configured) {
+                Some(_) => None,
+                None => configured.or(Some(crate::config::SidebarGroupBy::Project)),
+            }),
+        }
+    };
+
+    match new_mode {
+        Some(mode) => Cmd::new("tmux")
+            .args(&[
+                "set-option",
+                "-g",
+                "@workmux_sidebar_group_by",
+                group_by_option_value(mode),
+            ])
+            .run()?,
+        None => Cmd::new("tmux")
+            .args(&["set-option", "-gu", "@workmux_sidebar_group_by"])
+            .run()?,
+    };
+
+    let store = crate::state::StateStore::new()?;
+    let mut settings = store.load_settings()?;
+    settings.sidebar_group_by = new_mode.map(|mode| group_by_option_value(mode).to_string());
+    store.save_settings(&settings)?;
+
+    signal_daemon();
+    Ok(())
+}
+
+/// Grouping currently in effect: the tmux override, else the persisted one,
+/// else what the config asks for.
+fn read_sidebar_group_by(
+    configured: Option<crate::config::SidebarGroupBy>,
+) -> Option<crate::config::SidebarGroupBy> {
+    if let Ok(output) = Cmd::new("tmux")
+        .args(&["show-option", "-gqv", "@workmux_sidebar_group_by"])
+        .run_and_capture_stdout()
+    {
+        let trimmed = output.trim();
+        if !trimmed.is_empty() {
+            return parse_sidebar_group_by(trimmed).unwrap_or(configured);
+        }
+    }
+
+    if let Ok(store) = crate::state::StateStore::new()
+        && let Ok(settings) = store.load_settings()
+        && let Some(ref mode) = settings.sidebar_group_by
+    {
+        return parse_sidebar_group_by(mode).unwrap_or(configured);
+    }
+
+    configured
+}
+
 fn current_listed_window_pane<'a>(
     panes: &'a [&str],
     current_pane_id: &'a str,
@@ -1065,6 +1139,35 @@ mod tests {
     }
 
     #[test]
+    fn parse_sidebar_group_by_accepts_every_runtime_value() {
+        assert_eq!(parse_sidebar_group_by("none").unwrap(), None);
+        assert_eq!(parse_sidebar_group_by("Off").unwrap(), None);
+        assert_eq!(
+            parse_sidebar_group_by(" Project ").unwrap(),
+            Some(crate::config::SidebarGroupBy::Project)
+        );
+        assert_eq!(
+            parse_sidebar_group_by("session").unwrap(),
+            Some(crate::config::SidebarGroupBy::Session)
+        );
+        assert!(parse_sidebar_group_by("porject").is_err());
+    }
+
+    #[test]
+    fn group_by_option_values_round_trip() {
+        for mode in [
+            None,
+            Some(crate::config::SidebarGroupBy::Project),
+            Some(crate::config::SidebarGroupBy::Session),
+        ] {
+            assert_eq!(
+                parse_sidebar_group_by(group_by_option_value(mode)).unwrap(),
+                mode
+            );
+        }
+    }
+
+    #[test]
     fn parse_sidebar_filter_mode_rejects_invalid_values() {
         assert!(parse_sidebar_filter_mode("sessoin").is_err());
     }
@@ -1140,10 +1243,43 @@ mod tests {
     }
 
     #[test]
+    fn resolve_width_preserves_narrow_explicit_widths() {
+        let mut config = crate::config::Config::default();
+        for (width, expected) in [(0, 1), (1, 1), (8, 8)] {
+            config.sidebar.width = Some(crate::config::SidebarWidth::Absolute(width));
+            assert_eq!(resolve_width_for(&config, 200, Some(40)), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_width_preserves_narrow_synced_widths() {
+        let config = crate::config::Config::default();
+        for (width, expected) in [(0, 1), (1, 1), (8, 8)] {
+            assert_eq!(resolve_width_for(&config, 200, Some(width)), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_width_preserves_narrow_percentages() {
+        let mut config = crate::config::Config::default();
+        config.sidebar.width = Some(crate::config::SidebarWidth::Percent(4));
+        assert_eq!(resolve_width_for(&config, 200, None), 8);
+        assert_eq!(resolve_width_for(&config, 20, None), 1);
+    }
+
+    #[test]
+    fn resolve_width_reserves_content_space_in_small_windows() {
+        let config = crate::config::Config::default();
+        for (window, expected) in [(18, 8), (15, 5), (11, 1), (10, 1), (0, 1)] {
+            assert_eq!(resolve_width_for(&config, window, Some(8)), expected);
+        }
+    }
+
+    #[test]
     fn resolve_width_clamps_synced_to_window() {
         let config = crate::config::Config::default();
         assert_eq!(resolve_width_for(&config, 60, Some(80)), 50);
-        assert_eq!(resolve_width_for(&config, 200, Some(5)), 10);
+        assert_eq!(resolve_width_for(&config, 200, Some(5)), 5);
     }
 
     #[test]

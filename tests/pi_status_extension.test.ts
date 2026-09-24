@@ -215,26 +215,26 @@ describe('pi workmux status extension', () => {
     expect(harness.statuses).toEqual(['working', 'done', 'working', 'done']);
   });
 
-  test.each(abortedMessages)('settled aborts are inactive with an authoritative publisher', async (message) => {
+  test.each(abortedMessages)('keeps aborted continuations working with an authoritative publisher', async (message) => {
     const harness = await createHarness(message);
     await harness.emit('agent_start');
     await harness.activity(1);
     await harness.emit('agent_settled');
     expect(harness.statuses).toEqual(['working']);
     await harness.activity(0);
-    expect(harness.statuses).toEqual(['working', 'done']);
+    expect(harness.statuses).toEqual(['working']);
     harness.setMessage(stoppedMessage());
     await harness.emit('agent_start');
     await harness.emit('agent_settled');
-    expect(harness.statuses).toEqual(['working', 'done', 'working', 'done']);
+    expect(harness.statuses).toEqual(['working', 'done']);
   });
 
-  test('a late publisher clears the ordinary aborted-continuation status', async () => {
+  test('a zero-child snapshot does not interrupt an aborted continuation', async () => {
     const harness = await createHarness(abortedMessages[0]);
     await harness.emit('agent_start');
-    await harness.emit('agent_settled');
     await harness.activity(0);
-    expect(harness.statuses).toEqual(['working', 'done']);
+    await harness.emit('agent_settled');
+    expect(harness.statuses).toEqual(['working']);
   });
 
   test('ignores malformed snapshots without enabling aggregate behavior', async () => {

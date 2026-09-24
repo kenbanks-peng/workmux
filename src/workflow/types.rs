@@ -134,7 +134,7 @@ pub struct SetupOptions {
     pub focus_window: bool,
     /// Working directory for the tmux window. If None, uses worktree_path.
     pub working_dir: Option<PathBuf>,
-    /// Config root directory in source repo (for file ops). If None, uses main worktree root.
+    /// Source directory for configured file operations. If None, uses the project root.
     pub config_root: Option<PathBuf>,
     /// If true, open existing worktree instead of failing when it already exists.
     pub open_if_exists: bool,

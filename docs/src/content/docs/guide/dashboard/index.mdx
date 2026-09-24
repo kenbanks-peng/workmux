@@ -49,55 +49,55 @@ The dashboard has two views, toggled with `Tab`:
 
 ## Keybindings (Agents view)
 
-| Key       | Action                                |
-| --------- | ------------------------------------- |
-| `1`-`9`   | Quick jump to agent                   |
-| `Tab`     | Switch to worktree view               |
-| `Bksp`    | Toggle between current and last agent |
-| `d`       | View diff (opens WIP view)            |
-| `o`       | Open PR in browser                    |
-| `O`       | Open PR checks in browser             |
-| `p`       | Peek at agent (dashboard stays open)  |
-| `s`       | Cycle sort mode                       |
-| `F`       | Toggle session filter                 |
-| `f`       | Toggle stale filter (show/hide stale) |
-| `i`       | Enter input mode (type to agent)      |
-| `X`       | Kill selected agent                   |
-| `R`       | Sweep (bulk remove merged/gone)       |
-| `Ctrl+u`  | Scroll preview up                     |
-| `Ctrl+d`  | Scroll preview down                   |
-| `+`/`-`   | Resize preview pane                   |
-| `Enter`   | Go to selected agent                  |
-| `/`       | Filter agents by name                 |
-| `j`/`k`   | Navigate up/down                      |
-| `T`       | Cycle theme                           |
-| `:`       | Open command palette                  |
-| `q`/`Esc` | Quit                                  |
-| `Ctrl+c`  | Quit (works from any view)            |
+| Key      | Action                                |
+| -------- | ------------------------------------- |
+| `1`-`9`  | Quick jump to agent                   |
+| `Tab`    | Switch to worktree view               |
+| `Bksp`   | Toggle between current and last agent |
+| `d`      | View diff (opens WIP view)            |
+| `o`      | Open PR in browser                    |
+| `O`      | Open PR checks in browser             |
+| `p`      | Peek at agent (dashboard stays open)  |
+| `s`      | Cycle sort mode                       |
+| `F`      | Toggle session filter                 |
+| `f`      | Toggle stale filter (show/hide stale) |
+| `i`      | Enter input mode (type to agent)      |
+| `X`      | Kill selected agent                   |
+| `R`      | Sweep (bulk remove merged/gone)       |
+| `Ctrl+u` | Scroll preview up                     |
+| `Ctrl+d` | Scroll preview down                   |
+| `+`/`-`  | Resize preview pane                   |
+| `Enter`  | Go to selected agent                  |
+| `/`      | Filter agents by name                 |
+| `j`/`k`  | Navigate up/down                      |
+| `T`      | Cycle theme                           |
+| `:`      | Open command palette                  |
+| `q`      | Quit                                  |
+| `Ctrl+c` | Quit (works from any view)            |
 
 Agent jumps close the dashboard by default. See [`close_on_jump`](/guide/dashboard/configuration/#staying-open-after-a-jump) to keep it open.
 
 ## Keybindings (Worktrees view)
 
-| Key       | Action                                 |
-| --------- | -------------------------------------- |
-| `1`-`9`   | Quick jump to worktree index           |
-| `Tab`     | Switch to agents view                  |
-| `Enter`   | Jump to worktree (agent or mux window) |
-| `o`       | Open PR in browser                     |
-| `O`       | Open PR checks in browser              |
-| `a`       | Add worktree                           |
-| `r`       | Remove worktree                        |
-| `c`       | Close mux window (keeps worktree)      |
-| `R`       | Sweep (bulk remove merged/gone)        |
-| `s`       | Cycle sort mode                        |
-| `p`       | Switch project                         |
-| `/`       | Filter worktrees by name/branch        |
-| `j`/`k`   | Navigate up/down                       |
-| `T`       | Cycle theme                            |
-| `:`       | Open command palette                   |
-| `q`/`Esc` | Quit                                   |
-| `Ctrl+c`  | Quit (works from any view)             |
+| Key      | Action                                 |
+| -------- | -------------------------------------- |
+| `1`-`9`  | Quick jump to worktree index           |
+| `Tab`    | Switch to agents view                  |
+| `Enter`  | Jump to worktree (agent or mux window) |
+| `o`      | Open PR in browser                     |
+| `O`      | Open PR checks in browser              |
+| `a`      | Add worktree                           |
+| `r`      | Remove worktree                        |
+| `c`      | Close mux window (keeps worktree)      |
+| `R`      | Sweep (bulk remove merged/gone)        |
+| `s`      | Cycle sort mode                        |
+| `p`      | Switch project                         |
+| `/`      | Filter worktrees by name/branch        |
+| `j`/`k`  | Navigate up/down                       |
+| `T`      | Cycle theme                            |
+| `:`      | Open command palette                   |
+| `q`      | Quit                                   |
+| `Ctrl+c` | Quit (works from any view)             |
 
 Worktree jumps follow the [`close_on_jump`](/guide/dashboard/configuration/#staying-open-after-a-jump) setting.
 
@@ -121,6 +121,7 @@ released when the dashboard exits.
 - **Worktree** (`worktree`): Worktree/window name
 - **Git** (`git`): Diff stats showing branch changes (dim) and uncommitted changes (bright)
 - **PR** (`pr`): Pull request number and check status, shown once an agent has one
+- **Win** (`window`): Multiplexer window index, blank when the backend does not expose one
 - **Status** (`status`): Agent status icon (🤖 working, 💬 waiting, ✅ done, or "stale")
 - **Time** (`time`): Time since last status change
 - **Title** (`title`): Claude Code session title (auto-generated summary)

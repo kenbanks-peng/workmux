@@ -23,12 +23,18 @@ use crate::multiplexer::{LivePaneInfo, Multiplexer, TmuxBackend, create_backend,
 use crate::state::StateStore;
 
 use super::app::{SidebarFilterMode, SidebarLayoutMode};
-use super::snapshot::{CheckPathEntry, PrPathEntry, build_snapshot};
+use super::snapshot::{CheckPathEntry, PrPathEntry, SnapshotInputs, build_snapshot};
 
-/// Compute socket path from instance_id.
+/// Compute the socket path for a multiplexer instance.
 pub fn socket_path(instance_id: &str) -> PathBuf {
-    let safe_id = instance_id.replace(['/', '\\'], "-");
-    std::env::temp_dir().join(format!("workmux-sidebar-{}.sock", safe_id))
+    // FNV-1a provides a stable fixed-width key across the controller and daemon
+    // while keeping long tmux socket paths below Unix socket limits.
+    let mut key = 0xcbf29ce484222325u64;
+    for byte in instance_id.as_bytes() {
+        key ^= u64::from(*byte);
+        key = key.wrapping_mul(0x100000001b3);
+    }
+    std::env::temp_dir().join(format!("workmux-sidebar-{key:016x}.sock"))
 }
 
 /// Result of a batched tmux query.
@@ -46,6 +52,8 @@ struct TmuxState {
     layout: Option<String>,
     filter: Option<String>,
     sleeping_panes: Option<String>,
+    group_by: Option<String>,
+    expanded_groups: Option<String>,
 }
 
 /// Query all sidebar-relevant tmux state in a single server observation.
@@ -64,6 +72,8 @@ fn query_tmux_state(tmux: &TmuxBackend) -> Result<TmuxState> {
         layout: snapshot.layout,
         filter: snapshot.filter,
         sleeping_panes: snapshot.sleeping_panes,
+        group_by: snapshot.group_by,
+        expanded_groups: snapshot.expanded_groups,
     })
 }
 
@@ -106,6 +116,10 @@ fn snapshots_equal(
         check_statuses: _,
         interrupted_pane_ids: _,
         sleeping_pane_ids: _,
+        group_by: _,
+        expanded_groups: _,
+        stale_pane_ids: _,
+        collapse_stale: _,
         agents: _,
         config_version: _,
     } = left;
@@ -121,6 +135,10 @@ fn snapshots_equal(
         && left.check_statuses == right.check_statuses
         && left.interrupted_pane_ids == right.interrupted_pane_ids
         && left.sleeping_pane_ids == right.sleeping_pane_ids
+        && left.group_by == right.group_by
+        && left.expanded_groups == right.expanded_groups
+        && left.stale_pane_ids == right.stale_pane_ids
+        && left.collapse_stale == right.collapse_stale
         && left.agents == right.agents
         && left.config_version == right.config_version
 }
@@ -310,6 +328,42 @@ fn read_sidebar_filter_mode(tmux_value: Option<&str>) -> SidebarFilterMode {
     }
 
     SidebarFilterMode::default()
+}
+
+/// Read the sidebar grouping from the tmux global override, falling back to
+/// settings.json and then to the configured grouping. The override is what the
+/// `t` key and `workmux sidebar group` write, so every client agrees.
+fn read_sidebar_group_by(
+    cfg: &Config,
+    tmux_value: Option<&str>,
+) -> Option<crate::config::SidebarGroupBy> {
+    if let Some(value) = tmux_value {
+        return super::parse_sidebar_group_by(value).unwrap_or(cfg.sidebar.group_by());
+    }
+
+    if let Ok(store) = StateStore::new()
+        && let Ok(settings) = store.load_settings()
+        && let Some(ref mode) = settings.sidebar_group_by
+    {
+        return super::parse_sidebar_group_by(mode).unwrap_or(cfg.sidebar.group_by());
+    }
+
+    cfg.sidebar.group_by()
+}
+
+/// Group labels the user expanded, from the tmux global option. Labels are
+/// tab separated because a project or session name can contain spaces.
+fn read_expanded_groups(tmux_value: Option<&str>) -> Vec<String> {
+    tmux_value
+        .map(|value| {
+            value
+                .split('\t')
+                .map(str::trim)
+                .filter(|label| !label.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Read pane IDs manually marked as sleeping from the tmux global option.
@@ -2159,15 +2213,20 @@ pub fn run() -> Result<()> {
 
         if publish_pending && let Some((agents, tmux_state)) = &cached_inputs {
             publish_pending = false;
-            let (position, layout_mode, sort) = {
+            let (position, layout_mode, sort, group_by, collapse_stale) = {
                 let cfg = config.lock().unwrap();
                 (
                     read_sidebar_position(&cfg, tmux_state.position.as_deref()),
                     read_sidebar_layout_mode(&cfg, tmux_state.layout.as_deref())
                         .unwrap_or_default(),
                     cfg.sidebar.sort.unwrap_or_default(),
+                    read_sidebar_group_by(&cfg, tmux_state.group_by.as_deref()),
+                    cfg.sidebar.collapse_stale(),
                 )
             };
+            // Folding is part of the grouped presentation: a flat list shows
+            // every agent it carries.
+            let collapse_stale = collapse_stale && group_by.is_some();
             let now = Instant::now();
             let now_ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -2184,6 +2243,9 @@ pub fn run() -> Result<()> {
                     layout_mode,
                     filter_mode: read_sidebar_filter_mode(tmux_state.filter.as_deref()),
                     sort,
+                    group_by,
+                    collapse_stale,
+                    expanded_groups: read_expanded_groups(tmux_state.expanded_groups.as_deref()),
                     git_statuses: git_cache.lock().ok().map(|c| c.clone()).unwrap_or_default(),
                     pr_statuses: pr_cache.lock().ok().map(|c| c.clone()).unwrap_or_default(),
                     check_statuses: check_cache
@@ -2206,7 +2268,7 @@ pub fn run() -> Result<()> {
             output.snapshot.config_version = config_version.load(Ordering::Relaxed);
             server.broadcast(&output.snapshot);
 
-            let stale_threshold = 60 * 60;
+            let stale_threshold = super::snapshot::STALE_THRESHOLD_SECS;
             let entries: Vec<GitWorkerPath> = output
                 .snapshot
                 .agents
@@ -2274,10 +2336,13 @@ pub fn run() -> Result<()> {
                 last_config_dirs = config_dirs;
             }
 
-            let agent_list = output
-                .snapshot
+            // Navigation reaches live work: an agent nobody is waiting on is
+            // not worth a hotkey, folded away or not.
+            let snapshot = &output.snapshot;
+            let agent_list = snapshot
                 .agents
                 .iter()
+                .filter(|agent| super::snapshot::is_jump_target(snapshot, agent))
                 .map(|agent| agent.pane_id.as_str())
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -2362,6 +2427,9 @@ struct TickInput {
     layout_mode: SidebarLayoutMode,
     filter_mode: SidebarFilterMode,
     sort: crate::config::SidebarSort,
+    group_by: Option<crate::config::SidebarGroupBy>,
+    collapse_stale: bool,
+    expanded_groups: Vec<String>,
     git_statuses: HashMap<PathBuf, GitStatus>,
     pr_statuses: HashMap<PathBuf, PrPathEntry>,
     check_statuses: HashMap<PathBuf, CheckPathEntry>,
@@ -2390,7 +2458,6 @@ struct TickOutput {
 /// 2. Mutates agents in memory (status and activity timestamps reset for resumed agents)
 /// 3. Builds the snapshot from the already-mutated agents
 /// 4. Returns side effects (state file writes, runtime file write)
-#[allow(clippy::too_many_arguments)]
 fn compute_tick(
     input: TickInput,
     tracker: &mut InactivityTracker,
@@ -2408,6 +2475,9 @@ fn compute_tick(
         layout_mode,
         filter_mode,
         sort,
+        group_by,
+        collapse_stale,
+        expanded_groups,
         git_statuses,
         pr_statuses,
         check_statuses,
@@ -2433,26 +2503,30 @@ fn compute_tick(
         }
     }
 
-    // Phase 3: Build snapshot from already-mutated agents
-    let mut snapshot = build_snapshot(
+    // Phase 3: Build snapshot from already-mutated agents. Interruption is
+    // known from phase 1, so priority ordering sees the same state clients do.
+    let snapshot = build_snapshot(SnapshotInputs {
         agents,
-        &tmux_state.window_statuses,
-        &tmux_state.pane_window_ids,
-        &tmux_state.pane_window_indexes,
-        tmux_state.active_windows,
-        tmux_state.active_pane_ids,
-        tmux_state.window_pane_counts,
+        tmux_statuses: tmux_state.window_statuses,
+        pane_window_ids: tmux_state.pane_window_ids,
+        pane_window_indexes: tmux_state.pane_window_indexes,
+        active_windows: tmux_state.active_windows,
+        active_pane_ids: tmux_state.active_pane_ids,
+        window_pane_counts: tmux_state.window_pane_counts,
         position,
         layout_mode,
         filter_mode,
         sort,
-        status_icons,
+        group_by,
+        collapse_stale,
+        expanded_groups,
+        status_icons: status_icons.clone(),
         git_statuses,
         pr_statuses,
         check_statuses,
-        &sleeping_pane_ids,
-    );
-    snapshot.interrupted_pane_ids = interrupted.clone();
+        sleeping_pane_ids,
+        interrupted_pane_ids: interrupted.clone(),
+    });
 
     // Phase 4: Determine runtime write side effect
     let runtime_write = if interrupted != *last_interrupted || heartbeat_due {
@@ -2539,6 +2613,42 @@ mod tests {
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
         run_git(path, &["init", "-q"]);
+    }
+
+    #[test]
+    fn socket_path_uses_a_stable_fixed_width_instance_key() {
+        let default = socket_path("/private/tmp/tmux-501/default");
+        let long = socket_path("/private/tmp/tmux-501/sidebar-repro-socket");
+        let unicode = socket_path("/private/tmp/tmux-501/サイドバー");
+
+        assert_eq!(default.parent(), Some(std::env::temp_dir().as_path()));
+        assert_eq!(
+            default.file_name().unwrap(),
+            "workmux-sidebar-3d3d4a9387e30f49.sock"
+        );
+        assert_eq!(
+            long.file_name().unwrap(),
+            "workmux-sidebar-51c46e2d6ee045f1.sock"
+        );
+        assert_eq!(
+            unicode.file_name().unwrap(),
+            "workmux-sidebar-b596df9918d556c8.sock"
+        );
+    }
+
+    #[test]
+    fn socket_path_for_a_long_instance_can_be_bound() {
+        let unique = tempfile::tempdir().unwrap();
+        let instance_id = format!(
+            "/private/tmp/tmux-501/{}/{}",
+            unique.path().display(),
+            "long-unicode-name-サイドバー".repeat(8)
+        );
+        let path = socket_path(&instance_id);
+
+        let listener = UnixListener::bind(&path).unwrap();
+        drop(listener);
+        std::fs::remove_file(path).unwrap();
     }
 
     fn working_agent(pane_id: &str, updated_ts: u64) -> AgentPane {
@@ -2761,6 +2871,10 @@ mod tests {
             position: SidebarPosition::Left,
             layout_mode: SidebarLayoutMode::Tiles,
             filter_mode: SidebarFilterMode::None,
+            group_by: None,
+            expanded_groups: Vec::new(),
+            stale_pane_ids: std::collections::HashSet::new(),
+            collapse_stale: false,
             active_windows: HashSet::new(),
             active_pane_ids: HashSet::new(),
             window_pane_counts: HashMap::new(),
@@ -3706,6 +3820,7 @@ mod tests {
             window: Some("window".into()),
             session_id: Some("$1".into()),
             window_id: Some("@1".into()),
+            window_index: None,
         };
 
         tracker.reconcile_identities(
@@ -3750,6 +3865,7 @@ mod tests {
                 window: Some("window".into()),
                 session_id: Some("$1".into()),
                 window_id: Some("@1".into()),
+                window_index: None,
             },
         )]);
 
@@ -4127,9 +4243,14 @@ mod tests {
                         layout: None,
                         filter: None,
                         sleeping_panes: None,
+                        group_by: None,
+                        expanded_groups: None,
                     },
                     captured_panes: captures,
                     sort: crate::config::SidebarSort::default(),
+                    group_by: None,
+                    collapse_stale: false,
+                    expanded_groups: Vec::new(),
                     now,
                     now_ts,
                     position: SidebarPosition::Left,

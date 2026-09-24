@@ -86,6 +86,7 @@ Most options have sensible defaults. You only need to configure what you want to
 | `merge_keep`       | Keep resources after `workmux merge` by default                                      | `false`                     |
 | `theme`            | Dashboard color scheme (see [themes](#themes))                                       | `default` (auto dark/light) |
 | `mode`             | Tmux mode (`window` or `session`). See [session mode](/guide/session-mode/).         | `window`                    |
+| `default_session`  | Session to return to when a workmux session closes (session mode)                    | Previous session            |
 
 Set `base_branch: auto` to create new branches from the effective main branch,
 regardless of the currently checked-out branch. Workmux uses configured
@@ -173,15 +174,37 @@ panes:
 
 Each pane supports:
 
-| Option       | Description                                                          | Default |
-| ------------ | -------------------------------------------------------------------- | ------- |
-| `name`       | Pane display name (currently applied by the Zellij backend)          | ---     |
-| `command`    | Command to run (see [agent placeholders](#agent-placeholders) below) | Shell   |
-| `focus`      | Whether this pane receives focus                                     | `false` |
-| `zoom`       | Zoom pane to fullscreen (implies `focus: true`)                      | `false` |
-| `split`      | Split direction (`horizontal`, `vertical`, or Zellij-only `stacked`) | ---     |
-| `size`       | Absolute size in lines/cells                                         | 50%     |
-| `percentage` | Size as percentage (1-100)                                           | 50%     |
+| Option       | Description                                                          | Default          |
+| ------------ | -------------------------------------------------------------------- | ---------------- |
+| `name`       | Pane display name (currently applied by the Zellij backend)          | ---              |
+| `command`    | Command to run (see [agent placeholders](#agent-placeholders) below) | Shell            |
+| `focus`      | Whether this pane receives focus                                     | `false`          |
+| `zoom`       | Zoom pane to fullscreen (implies `focus: true`)                      | `false`          |
+| `split`      | Split direction (`horizontal`, `vertical`, or Zellij-only `stacked`) | ---              |
+| `size`       | Absolute size in lines/cells                                         | 50%              |
+| `percentage` | Size as percentage (1-100)                                           | 50%              |
+| `target`     | 0-based pane index to split from; defaults to most recent pane       | most recent pane |
+
+Use `target` when a new pane should split from an earlier pane instead of the
+one that was just created. This is useful for layouts with two panes across the
+top and one full-width pane on the bottom.
+
+```yaml
+panes:
+  - command: nvim
+    focus: true
+  - command: pnpm install && pnpm run dev
+    split: vertical
+    size: 15
+  - command: <agent>
+    split: horizontal
+    target: 0
+```
+
+The example places `nvim` at the top left, the agent to its right, and the dev
+server across the bottom. `target` must refer to a pane that already exists in
+the same layout. For example, pane `2` can target `0` or `1`, but not `2` or any
+later pane.
 
 `size` is supported by tmux. Kitty and WezTerm do not provide a fixed-cell split operation. `percentage` is supported by tmux and WezTerm, and by Kitty when using the `splits` layout.
 
@@ -283,7 +306,7 @@ A project can override the complete `hook_shell` argv in `.workmux.yaml`; when o
 | `pre_merge`   | Before merging (aborts on failure)                | `WM_BRANCH_NAME`, `WM_TARGET_BRANCH` |
 | `pre_remove`  | Before worktree removal (aborts on failure)       | -                                    |
 
-`WM_CONFIG_DIR` points to the directory containing the `.workmux.yaml` that was used, which may differ from `WM_WORKTREE_PATH` when using nested configs.
+`WM_PROJECT_ROOT` points to the repository's main worktree, regardless of where the selected config is stored. `WM_CONFIG_DIR` points to the corresponding config directory in the new worktree, which may differ from `WM_WORKTREE_PATH` when using nested configs.
 
 Example:
 
@@ -293,6 +316,14 @@ post_create:
 
 pre_merge:
   - just check
+```
+
+In Node.js projects, `pre_remove` defaults to a fast `node_modules` cleanup, and defining your own commands replaces that default. Use `"<cleanup-node-modules>"` to keep it alongside them:
+
+```yaml
+pre_remove:
+  - cp -r test-results/ "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE/"
+  - "<cleanup-node-modules>"
 ```
 
 ### Agent status icons

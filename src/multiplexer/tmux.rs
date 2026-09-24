@@ -29,7 +29,7 @@ const LIVE_PANE_RECORD_SEPARATOR: char = '\x1e';
 const LIVE_PANE_FIELD_SEPARATOR: char = '\x1f';
 const LIVE_PANE_ESCAPED_RECORD_SEPARATOR: &str = "\\036";
 const LIVE_PANE_ESCAPED_FIELD_SEPARATOR: &str = "\\037";
-const LIVE_PANE_FORMAT: &str = "\x1e#{pane_id}\x1f#{pane_pid}\x1f#{pane_current_command}\x1f#{pane_current_path}\x1f#{pane_title}\x1f#{session_name}\x1f#{window_name}\x1f#{session_id}\x1f#{window_id}";
+const LIVE_PANE_FORMAT: &str = "\x1e#{pane_id}\x1f#{pane_pid}\x1f#{pane_current_command}\x1f#{pane_current_path}\x1f#{pane_title}\x1f#{session_name}\x1f#{window_name}\x1f#{session_id}\x1f#{window_id}\x1f#{window_index}";
 const WINDOW_OWNERSHIP_FORMAT: &str = "\x1e#{window_id}\x1f#{window_name}\x1f#{session_name}\x1f#{@workmux_token}\x1f#{pane_current_path}";
 macro_rules! server_boot_format {
     () => {
@@ -45,7 +45,8 @@ const SIDEBAR_STATE_FORMAT: &str = concat!(
     "\x1f#{window_active}\x1f#{session_attached}\x1f#{pane_active}\x1f#{window_index}\x1f",
     server_boot_format!(),
     "\x1f#{@workmux_sidebar_position}\x1f#{@workmux_sidebar_layout}",
-    "\x1f#{@workmux_sidebar_filter}\x1f#{@workmux_sleeping_panes}"
+    "\x1f#{@workmux_sidebar_filter}\x1f#{@workmux_sleeping_panes}",
+    "\x1f#{@workmux_sidebar_group_by}\x1f#{@workmux_sidebar_expanded}"
 );
 
 /// One tmux server observation containing every input needed by a daemon tick.
@@ -63,6 +64,8 @@ pub(crate) struct TmuxSidebarSnapshot {
     pub layout: Option<String>,
     pub filter: Option<String>,
     pub sleeping_panes: Option<String>,
+    pub group_by: Option<String>,
+    pub expanded_groups: Option<String>,
 }
 
 fn live_pane_fields(line: &str) -> Vec<&str> {
@@ -106,6 +109,7 @@ fn parse_live_pane_line(line: &str) -> Option<(String, LivePaneInfo)> {
                 .get(8)
                 .map(|value| value.to_string())
                 .filter(|value| !value.is_empty()),
+            window_index: parts.get(9).and_then(|value| value.parse().ok()),
         },
     ))
 }
@@ -153,6 +157,8 @@ fn parse_sidebar_snapshot(output: &str) -> Result<TmuxSidebarSnapshot> {
         layout: None,
         filter: None,
         sleeping_panes: None,
+        group_by: None,
+        expanded_groups: None,
     };
 
     for record in live_pane_records(output) {
@@ -162,7 +168,7 @@ fn parse_sidebar_snapshot(output: &str) -> Result<TmuxSidebarSnapshot> {
                 .or_else(|| record.strip_prefix(LIVE_PANE_ESCAPED_RECORD_SEPARATOR))
                 .unwrap_or(record),
         );
-        if fields.len() != 17 || fields[0].is_empty() {
+        if fields.len() != 19 || fields[0].is_empty() {
             return Err(anyhow!("tmux returned malformed sidebar state: {record:?}"));
         }
 
@@ -202,6 +208,7 @@ fn parse_sidebar_snapshot(output: &str) -> Result<TmuxSidebarSnapshot> {
                 window: Some(fields[5].to_string()),
                 session_id: None,
                 window_id: nonempty(fields[6]),
+                window_index: Some(window_index),
             },
         );
         snapshot.window_statuses.insert(pane_id.clone(), status);
@@ -230,6 +237,8 @@ fn parse_sidebar_snapshot(output: &str) -> Result<TmuxSidebarSnapshot> {
             snapshot.layout = nonempty(fields[14]);
             snapshot.filter = nonempty(fields[15]);
             snapshot.sleeping_panes = nonempty(fields[16]);
+            snapshot.group_by = nonempty(fields[17]);
+            snapshot.expanded_groups = nonempty(fields[18]);
         }
     }
 
@@ -267,7 +276,7 @@ fn parse_window_ownership_records(output: &str) -> Result<Vec<WindowOwnershipRec
 
 fn parse_live_pane_line_strict(line: &str) -> Result<(String, LivePaneInfo)> {
     let parts = live_pane_fields(line);
-    if parts.len() != 9 || parts[0].is_empty() {
+    if parts.len() != 10 || parts[0].is_empty() {
         return Err(anyhow!(
             "tmux returned malformed pane information: {line:?}"
         ));
@@ -620,6 +629,22 @@ impl TmuxBackend {
             Some(session) => format!("{}:={}", session, target.full_name),
             None => format!("={}", target.full_name),
         }
+    }
+
+    /// Close command for a session name, preferring `destination` for any
+    /// clients tmux has to relocate.
+    fn shell_kill_session_cmd_to(
+        &self,
+        full_name: &str,
+        destination: Option<&str>,
+    ) -> Result<String> {
+        let target = format!("={full_name}:");
+        let id = self.tmux_query(&["display-message", "-p", "-t", &target, "#{session_id}"])?;
+        let id = id.trim();
+        if id.is_empty() {
+            return Err(anyhow!("Session {full_name} not found"));
+        }
+        self.shell_close_session_by_id_guard_cmd(id, destination)
     }
 
     fn shell_escape(value: &str) -> String {
@@ -984,7 +1009,11 @@ impl Multiplexer for TmuxBackend {
     }
 
     fn kill_session(&self, full_name: &str) -> Result<()> {
-        let script = self.shell_kill_session_cmd(full_name)?;
+        self.kill_session_to(full_name, None)
+    }
+
+    fn kill_session_to(&self, full_name: &str, destination: Option<&str>) -> Result<()> {
+        let script = self.shell_kill_session_cmd_to(full_name, destination)?;
         Cmd::new("sh").args(&["-c", &script]).run()?;
         Ok(())
     }
@@ -1046,8 +1075,17 @@ impl Multiplexer for TmuxBackend {
     }
 
     fn schedule_session_close(&self, full_name: &str, delay: Duration) -> Result<()> {
+        self.schedule_session_close_to(full_name, None, delay)
+    }
+
+    fn schedule_session_close_to(
+        &self,
+        full_name: &str,
+        destination: Option<&str>,
+        delay: Duration,
+    ) -> Result<()> {
         let delay_secs = format!("{:.3}", delay.as_secs_f64());
-        let kill = self.shell_kill_session_cmd(full_name)?;
+        let kill = self.shell_kill_session_cmd_to(full_name, destination)?;
         let script = format!("sleep {delay_secs}; {kill}");
 
         self.run_shell(&script)
@@ -1190,13 +1228,7 @@ impl Multiplexer for TmuxBackend {
     }
 
     fn shell_kill_session_cmd(&self, full_name: &str) -> Result<String> {
-        let target = format!("={full_name}:");
-        let id = self.tmux_query(&["display-message", "-p", "-t", &target, "#{session_id}"])?;
-        let id = id.trim();
-        if id.is_empty() {
-            return Err(anyhow!("Session {full_name} not found"));
-        }
-        self.shell_close_session_by_id_guard_cmd(id, None)
+        self.shell_kill_session_cmd_to(full_name, None)
     }
 
     fn shell_switch_to_last_session_cmd(&self) -> Result<String> {
@@ -1605,7 +1637,7 @@ fn inject_status_format(format: &str) -> String {
 mod tests {
     use super::*;
 
-    const LIVE_PANE_LINE: &str = "%7\t12345\tnode\t/repo\tWorking\tmain\twork\t$1\t@2";
+    const LIVE_PANE_LINE: &str = "%7\t12345\tnode\t/repo\tWorking\tmain\twork\t$1\t@2\t4";
 
     #[test]
     fn run_shell_preserves_literal_tmux_formats() {
@@ -1661,7 +1693,7 @@ mod tests {
 
     #[test]
     fn sidebar_snapshot_parses_one_server_observation() {
-        let output = "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f✓\x1f1\x1f1\x1f1\x1f4\x1f1700000000:42\x1ftop\x1fcompact\x1fsession\x1f%7 %8\n\x1e%8\x1f12346\x1fbash\x1fShell\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f0\x1f4\x1f1700000000:42\x1ftop\x1fcompact\x1fsession\x1f%7 %8\n";
+        let output = "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f✓\x1f1\x1f1\x1f1\x1f4\x1f1700000000:42\x1ftop\x1fcompact\x1fsession\x1f%7 %8\x1fproject\x1fapi\tmobile\n\x1e%8\x1f12346\x1fbash\x1fShell\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f0\x1f4\x1f1700000000:42\x1ftop\x1fcompact\x1fsession\x1f%7 %8\x1fproject\x1fapi\tmobile\n";
 
         let snapshot = parse_sidebar_snapshot(output).unwrap();
 
@@ -1684,13 +1716,15 @@ mod tests {
         assert_eq!(snapshot.layout.as_deref(), Some("compact"));
         assert_eq!(snapshot.filter.as_deref(), Some("session"));
         assert_eq!(snapshot.sleeping_panes.as_deref(), Some("%7 %8"));
+        assert_eq!(snapshot.group_by.as_deref(), Some("project"));
+        assert_eq!(snapshot.expanded_groups.as_deref(), Some("api\tmobile"));
     }
 
     #[test]
     fn sidebar_snapshot_accepts_attached_client_counts() {
         for attached in [0, 1, 2, 10] {
             let output = format!(
-                "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f{attached}\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n"
+                "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f{attached}\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n"
             );
             let snapshot = parse_sidebar_snapshot(&output).unwrap();
             assert_eq!(snapshot.live_panes.len(), 1);
@@ -1705,7 +1739,7 @@ mod tests {
 
     #[test]
     fn sidebar_snapshot_counts_linked_panes_once_and_tracks_each_session() {
-        let output = "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n\x1e%8\x1f12346\x1fbash\x1fShell\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f0\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n\x1e%7\x1f12345\x1fnode\x1fAgent\x1fother\x1fwork\x1f@2\x1f\x1f1\x1f2\x1f1\x1f9\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n\x1e%8\x1f12346\x1fbash\x1fShell\x1fother\x1fwork\x1f@2\x1f\x1f1\x1f2\x1f0\x1f9\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n";
+        let output = "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n\x1e%8\x1f12346\x1fbash\x1fShell\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f0\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n\x1e%7\x1f12345\x1fnode\x1fAgent\x1fother\x1fwork\x1f@2\x1f\x1f1\x1f2\x1f1\x1f9\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n\x1e%8\x1f12346\x1fbash\x1fShell\x1fother\x1fwork\x1f@2\x1f\x1f1\x1f2\x1f0\x1f9\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n";
         let snapshot = parse_sidebar_snapshot(output).unwrap();
         assert_eq!(snapshot.live_panes.len(), 2);
         assert_eq!(snapshot.window_pane_counts["@2"], 2);
@@ -1729,13 +1763,13 @@ mod tests {
         let error = parse_sidebar_snapshot("\x1e%7\x1f12345\n").unwrap_err();
         assert!(error.to_string().contains("malformed sidebar state"));
 
-        let malformed_pid = "\x1e%7\x1fnot-a-pid\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n";
+        let malformed_pid = "\x1e%7\x1fnot-a-pid\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f1\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n";
         let error = parse_sidebar_snapshot(malformed_pid).unwrap_err();
         assert!(error.to_string().contains("malformed sidebar pane PID"));
 
         for attached in ["", "-1", "invalid"] {
             let output = format!(
-                "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f{attached}\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\n"
+                "\x1e%7\x1f12345\x1fnode\x1fAgent\x1fmain\x1fwork\x1f@2\x1f\x1f1\x1f{attached}\x1f1\x1f4\x1f1700000000\x1fleft\x1ftiles\x1fnone\x1f\x1f\x1f\n"
             );
             let error = parse_sidebar_snapshot(&output).unwrap_err();
             assert!(
@@ -1787,18 +1821,28 @@ mod tests {
 
     #[test]
     fn live_pane_snapshot_accepts_octal_escaped_separators() {
-        let output = "\\036%7\\03712345\\037node\\037/repo/a\\037Working\\037main\\037work\\037$1\\037@2\n\\036%8\\03712346\\037bash\\037/repo/b\\037Shell\\037main\\037shell\\037$1\\037@3\n";
+        let output = "\\036%7\\03712345\\037node\\037/repo/a\\037Working\\037main\\037work\\037$1\\037@2\\0373\n\\036%8\\03712346\\037bash\\037/repo/b\\037Shell\\037main\\037shell\\037$1\\037@3\\0374\n";
 
         let panes = parse_live_pane_snapshot(output).unwrap();
 
         assert_eq!(panes["%7"].working_dir, PathBuf::from("/repo/a"));
         assert_eq!(panes["%8"].window_id.as_deref(), Some("@3"));
+        assert_eq!(panes["%8"].window_index, Some(4));
+    }
+
+    #[test]
+    fn live_pane_snapshot_rejects_missing_or_extra_fields() {
+        let missing = "%7\t12345\tnode\t/repo\tWorking\tmain\twork\t$1\t@2";
+        let extra = format!("{LIVE_PANE_LINE}\textra");
+
+        assert!(parse_live_pane_snapshot(missing).is_err());
+        assert!(parse_live_pane_snapshot(&extra).is_err());
     }
 
     #[test]
     fn live_pane_snapshot_preserves_newlines_inside_records() {
         let output =
-            "\x1e%7\x1f12345\x1fnode\x1f/repo/a\nb\x1fWorking\x1fmain\x1fwork\x1f$1\x1f@2\n";
+            "\x1e%7\x1f12345\x1fnode\x1f/repo/a\nb\x1fWorking\x1fmain\x1fwork\x1f$1\x1f@2\x1f3\n";
 
         let panes = parse_live_pane_snapshot(output).unwrap();
 
@@ -1808,7 +1852,7 @@ mod tests {
     #[test]
     fn live_pane_snapshot_preserves_tabs_inside_fields() {
         let output =
-            "\x1e%7\x1f12345\x1fnode\x1f/repo/a\tb\x1fWorking\x1fmain\x1fwork\x1f$1\x1f@2\n";
+            "\x1e%7\x1f12345\x1fnode\x1f/repo/a\tb\x1fWorking\x1fmain\x1fwork\x1f$1\x1f@2\x1f3\n";
 
         let panes = parse_live_pane_snapshot(output).unwrap();
 
@@ -1818,7 +1862,7 @@ mod tests {
     #[test]
     fn live_pane_snapshot_rejects_invalid_pid() {
         let error =
-            parse_live_pane_snapshot("%7\tnot-a-pid\tnode\t/repo\tWorking\tmain\twork\t$1\t@2")
+            parse_live_pane_snapshot("%7\tnot-a-pid\tnode\t/repo\tWorking\tmain\twork\t$1\t@2\t3")
                 .unwrap_err();
 
         assert!(error.to_string().contains("malformed pane PID"));

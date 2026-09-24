@@ -21,9 +21,34 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
-## Unreleased
+## v0.1.266 (2026-09-22)
 
+- Allow sidebar widths as narrow as one column for compact icon-only layouts, preserving widths below 10 columns when configured or resized. ([#297](https://github.com/raine/workmux/issues/297))
+
+## v0.1.265 (2026-09-22)
+
+- New! Group the sidebar by project or tmux session and fold away stale agents, off by default. See the [sidebar guide](https://workmux.raine.dev/guide/sidebar/#grouping).
+- Sort sidebar agents by attention needed with `sidebar.sort: priority`, placing waiting and done agents first. ([#285](https://github.com/raine/workmux/issues/285), [#289](https://github.com/raine/workmux/pull/289))
+- Show the pull request number beside its check status in the sidebar's default templates. ([#289](https://github.com/raine/workmux/pull/289))
+- Fix terminal resizing making tmux temporarily unresponsive when many windows have sidebars.
+
+## v0.1.264 (2026-09-21)
+
+- Add an opt-in `window` column to the dashboard's agent table for showing tmux window indexes. ([#227](https://github.com/raine/workmux/pull/227))
+- Show more of long worktree and branch names when the dashboard has room. ([#281](https://github.com/raine/workmux/pull/281))
+- Keep the dashboard open when `Esc` is pressed in its main views; use `q` or `Ctrl+C` to quit. ([#104](https://github.com/raine/workmux/pull/104))
+- Install shell completions automatically with Homebrew. ([#284](https://github.com/raine/workmux/pull/284))
+- Fix the sidebar failing to start on macOS when long temporary or custom tmux socket paths exceed Unix socket limits. ([#293](https://github.com/raine/workmux/issues/293))
+- Keep Pi panes marked as working throughout automatic compaction when delegated activity tracking is enabled, preserving the elapsed timer until the continuation finishes.
+- Enable the fast `node_modules` cleanup on worktree removal in monorepos where the lockfile lives in a subdirectory, such as `dashboard/pnpm-lock.yaml`, instead of only at the project root.
+- Keep the fast `node_modules` cleanup when a project defines its own `pre_remove` commands by listing `"<cleanup-node-modules>"` among them. Previously any `pre_remove` entry replaced the cleanup entirely. See the [lifecycle hooks guide](https://workmux.raine.dev/guide/configuration#lifecycle-hooks)
+
+## v0.1.263 (2026-09-16)
+
+- Fix dashboard removal and sweep actions targeting the wrong worktree when managing multiple projects. ([#272](https://github.com/raine/workmux/pull/272))
 - Prevent Pi and Oh My Pi status integrations from overwriting each other, and stop Oh My Pi from briefly showing waiting while tools start.
+- Fix `post_create` hooks receiving an incorrect `WM_PROJECT_ROOT` when using nested or alternate configs outside the repository. ([#283](https://github.com/raine/workmux/issues/283))
+- Add `default_session` to name a session that clients return to when a workmux session closes in session mode, instead of whichever session each client viewed previously. ([#278](https://github.com/raine/workmux/pull/278))
 
 ## v0.1.262 (2026-09-12)
 
@@ -35,7 +60,7 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 - Fix worktree creation failing in repositories with symlinked or hard-linked Git hooks outside container sandboxes. ([#274](https://github.com/raine/workmux/issues/274))
 - Fix `workmux set-window-status clear` leaving stale agent status in the sidebar.
 
-## v0.1.260 (2026-09-11)
+## v0.1.260 (2026-09-11
 
 - Create worktrees without a terminal multiplexer using `workmux add --headless`, with file operations and setup hooks included. Add `--json` for automation, and attach later with `workmux open`.
 - Hide or reorder columns in the dashboard's Worktrees tab with `dashboard.worktree_columns`. ([#270](https://github.com/raine/workmux/issues/270))

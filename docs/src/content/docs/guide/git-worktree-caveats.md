@@ -46,7 +46,10 @@ Modern package managers like `pnpm` use a global store with symlinks to `node_mo
 If your worktrees always have identical dependencies (e.g., working on multiple features from the same base), you could potentially symlink `node_modules` between worktrees. However, this breaks as soon as branches diverge in their dependencies, so it's generally safer to run a fresh install in each worktree.
 
 :::note
-In large monorepos, cleaning up `node_modules` during worktree removal can take significant time. workmux has a [special cleanup mechanism](https://github.com/raine/workmux/blob/main/src/scripts/cleanup_node_modules.sh) that moves `node_modules` to a temporary location and deletes it in the background, making the `remove` command return almost instantly.
+In large monorepos, cleaning up `node_modules` during worktree removal can take significant time. workmux has a [special cleanup mechanism](https://github.com/raine/workmux/blob/main/src/scripts/cleanup_node_modules.sh) that moves `node_modules` to a temporary location and deletes it in the background, making the `remove` command return almost instantly. It is enabled
+automatically when a lockfile (`pnpm-lock.yaml`, `package-lock.json`, or
+`yarn.lock`) exists at the project root or in a direct subdirectory. You can also
+request it explicitly with `"<cleanup-node-modules>"` in `pre_remove`.
 :::
 
 ## Rust projects

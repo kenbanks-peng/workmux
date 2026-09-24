@@ -29,15 +29,20 @@ Each agent row displays:
 
 ## Keybindings
 
-| Key     | Action                   |
-| ------- | ------------------------ |
-| `j`/`k` | Navigate up/down         |
-| `Enter` | Jump to agent pane       |
-| `g`/`G` | Jump to first/last       |
-| `v`     | Toggle layout mode       |
-| `f`     | Toggle session filter    |
-| `z`     | Toggle sleeping on agent |
-| `q`     | Open quit confirmation   |
+| Key     | Action                    |
+| ------- | ------------------------- |
+| `j`/`k` | Navigate up/down          |
+| `Enter` | Jump to agent pane        |
+| `g`/`G` | Jump to first/last        |
+| `v`     | Toggle layout mode        |
+| `f`     | Toggle session filter     |
+| `z`     | Toggle sleeping on agent  |
+| `t`     | Toggle grouping           |
+| `h`/`l` | Unfold/fold current group |
+| `s`     | Toggle the current fold   |
+| `S`     | Fold/unfold every group   |
+| `?`     | Show these keys           |
+| `q`     | Open quit confirmation    |
 
 ## Mouse support
 
@@ -57,6 +62,9 @@ through all sessions by default:
 | `workmux sidebar jump <N>`      | Jump to the Nth agent (1-indexed)                    |
 | `workmux sidebar filter`        | Toggle session filter (none/session)                 |
 | `workmux sidebar filter <MODE>` | Set filter mode: `none`/`all` or `session`/`project` |
+| `workmux sidebar group`         | Toggle grouping between grouped and flat             |
+| `workmux sidebar group <MODE>`  | Set grouping: `none`/`off`, `project` or `session`   |
+| `workmux sidebar group --clear` | Drop the runtime grouping and follow config again    |
 
 ### Example tmux keybindings
 
@@ -85,6 +93,8 @@ sidebar:
   # width: "15%"
   layout: tiles # left only: "compact" or "tiles" (default)
   dim_stale: true # dim agents whose activity state is older than one hour
+  group_by: project # "project" or "session"; unset keeps one flat list
+  collapse_stale: true # while grouped, fold stale agents behind a toggle
 ```
 
 For a horizontal top bar:
@@ -102,8 +112,8 @@ sidebar:
       - "{pane_title}"
 ```
 
-Explicit width values bypass the default 25-50 column clamp (minimum 10
-columns). Layout preference can also be toggled at runtime with `v` and is
+Explicit width values bypass the default 25-50 column clamp (minimum 1
+column). Layout preference can also be toggled at runtime with `v` and is
 persisted across restarts. Height only applies to `position: top`; set it as a
 row count for the number of horizontal lines you want to show. The top bar uses a
 horizontal chip layout, so `v` has no effect there. Horizontal templates render

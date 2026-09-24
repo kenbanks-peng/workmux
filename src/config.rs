@@ -15,6 +15,44 @@ use which::{which, which_in};
 /// making the workmux remove command return almost instantly.
 const NODE_MODULES_CLEANUP_SCRIPT: &str = include_str!("scripts/cleanup_node_modules.sh");
 
+/// Placeholder usable in `pre_remove` that expands to the built-in
+/// node_modules cleanup script. Lets a project keep the fast cleanup alongside
+/// its own hooks, which would otherwise replace the automatic default.
+const CLEANUP_NODE_MODULES_PLACEHOLDER: &str = "<cleanup-node-modules>";
+
+/// Names of lockfiles that mark a directory as a Node.js package.
+const NODE_LOCKFILES: [&str; 3] = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"];
+
+/// Whether `root` or any of its immediate subdirectories contains a Node.js
+/// lockfile.
+///
+/// Monorepos often keep the lockfile in a package directory (`dashboard/`,
+/// `frontend/`) rather than at the root, so a root-only check would miss them.
+/// The search stops at depth 1 and skips hidden directories and `node_modules`
+/// to keep the cost to a handful of directory reads.
+fn has_node_lockfile(root: &Path) -> bool {
+    fn has_lockfile_in(dir: &Path) -> bool {
+        NODE_LOCKFILES.iter().any(|name| dir.join(name).is_file())
+    }
+
+    if has_lockfile_in(root) {
+        return true;
+    }
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "node_modules" {
+            return false;
+        }
+        entry.file_type().is_ok_and(|t| t.is_dir()) && has_lockfile_in(&entry.path())
+    })
+}
+
 /// Configuration for file operations during worktree creation
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct FileConfig {
@@ -128,6 +166,8 @@ pub enum AgentColumn {
     /// Pull request and check status. Rendered only while at least one agent
     /// has GitHub status to show.
     Pr,
+    /// Multiplexer window index, as shown in the tmux status bar.
+    Window,
     /// Agent status (icons).
     Status,
     /// Time elapsed in the current status.
@@ -242,6 +282,23 @@ pub struct TemplatesConfig {
     /// Multi-line templates for horizontal bar chips (one string per line).
     #[serde(alias = "top")]
     pub horizontal: Option<Vec<String>>,
+    /// Templates used instead of the ones above while grouping is on.
+    pub grouped: Option<GroupedTemplatesConfig>,
+}
+
+/// Templates for the grouped presentation. A section header carries the
+/// project or session name, so rows there can drop what the header already
+/// says. Anything left unset falls back to the ungrouped template of the same
+/// name, then to the built-in grouped default.
+#[derive(Debug, Deserialize, Serialize, Default, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GroupedTemplatesConfig {
+    /// Single-line template for compact mode.
+    pub compact: Option<String>,
+    /// Multi-line templates for tile mode (one string per line).
+    pub tiles: Option<Vec<String>>,
+    /// Single-line template for group header rows.
+    pub header: Option<String>,
 }
 
 /// Detailed per-agent icon override: `{ icon, color }`.
@@ -337,30 +394,72 @@ pub struct SidebarConfig {
     /// Per-agent icon overrides.
     pub agent_icons: Option<AgentIcons>,
 
-    /// Row ordering: "recency" (default) or "window".
+    /// Row ordering: "recency" (default), "priority" or "window".
     pub sort: Option<SidebarSort>,
+
+    /// Group agents into labeled sections: "project" or "session". Unset or
+    /// "none" keeps one combined list.
+    pub group_by: Option<SidebarGroupBy>,
 
     /// Dim agents whose sidebar activity state exceeds the stale threshold.
     /// Default: true.
     pub dim_stale: Option<bool>,
+
+    /// Fold stale agents behind their group's toggle, giving the ones on show
+    /// a single line instead of a full tile. Part of the grouped presentation,
+    /// so it has no effect while grouping is off. Default: true.
+    pub collapse_stale: Option<bool>,
 }
 
 impl SidebarConfig {
     pub fn dim_stale(&self) -> bool {
         self.dim_stale.unwrap_or(true)
     }
+
+    /// Whether stale agents fold behind their group's toggle. Folding belongs
+    /// to the grouped presentation, so callers apply this only once grouping
+    /// is on.
+    pub fn collapse_stale(&self) -> bool {
+        self.collapse_stale.unwrap_or(true)
+    }
+
+    /// Grouping asked for by config, with `none` resolved. Grouping is opt in:
+    /// an unset value keeps the single flat list.
+    pub fn group_by(&self) -> Option<SidebarGroupBy> {
+        match self.group_by? {
+            SidebarGroupBy::None => None,
+            mode => Some(mode),
+        }
+    }
 }
 
-/// Sidebar row ordering.
+/// Sidebar row ordering within a group, or within the whole list when
+/// grouping is not configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SidebarSort {
     /// Most recent status change first, sleeping agents last.
     #[default]
     Recency,
+    /// Agents needing attention first: waiting, done, working, unknown,
+    /// stale or interrupted, sleeping. Recent activity breaks ties.
+    Priority,
     /// Multiplexer window order (session name, then window index). Keeps
     /// rows stable while agents work, matching the tmux window list.
     Window,
+}
+
+/// Sidebar grouping: how agents are divided into labeled sections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarGroupBy {
+    /// One combined list with no sections.
+    #[serde(alias = "off")]
+    None,
+    /// One section per repository.
+    Project,
+    /// One section per multiplexer session.
+    Session,
 }
 
 /// Sidebar pane position.
@@ -666,6 +765,12 @@ pub struct Config {
     /// None means "use default" (Window), Some means explicitly set
     pub mode: Option<MuxMode>,
 
+    /// Session mode only. Session to return to when a workmux-managed session
+    /// closes. Not prefixed with `window_prefix`, so it can name a session
+    /// workmux does not manage.
+    #[serde(default)]
+    pub default_session: Option<String>,
+
     /// Placement for new tmux windows in window mode.
     #[serde(default)]
     pub window_placement: Option<WindowPlacement>,
@@ -837,7 +942,10 @@ pub struct PaneConfig {
     #[serde(default)]
     pub focus: bool,
 
-    /// Split direction from the previous pane (horizontal, vertical, or zellij-only stacked)
+    /// Split direction for the new pane (horizontal, vertical, or Zellij-only stacked).
+    ///
+    /// The pane splits from `target` when specified, otherwise from the most
+    /// recently created pane.
     #[serde(default)]
     pub split: Option<SplitDirection>,
 
@@ -2376,6 +2484,42 @@ pub fn global_config_path() -> Option<PathBuf> {
     Some(yaml)
 }
 
+/// Merge sidebar templates field by field so a project override that sets one
+/// template keeps inheriting the others.
+fn merge_sidebar_templates(
+    global: Option<&TemplatesConfig>,
+    project: Option<&TemplatesConfig>,
+) -> Option<TemplatesConfig> {
+    match (global, project) {
+        (None, None) => None,
+        (Some(g), None) => Some(g.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(g), Some(p)) => Some(TemplatesConfig {
+            compact: p.compact.clone().or_else(|| g.compact.clone()),
+            tiles: p.tiles.clone().or_else(|| g.tiles.clone()),
+            horizontal: p.horizontal.clone().or_else(|| g.horizontal.clone()),
+            grouped: merge_grouped_templates(g.grouped.as_ref(), p.grouped.as_ref()),
+        }),
+    }
+}
+
+/// Merge the grouped templates field by field, like their ungrouped peers.
+fn merge_grouped_templates(
+    global: Option<&GroupedTemplatesConfig>,
+    project: Option<&GroupedTemplatesConfig>,
+) -> Option<GroupedTemplatesConfig> {
+    match (global, project) {
+        (None, None) => None,
+        (Some(g), None) => Some(g.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(g), Some(p)) => Some(GroupedTemplatesConfig {
+            compact: p.compact.clone().or_else(|| g.compact.clone()),
+            tiles: p.tiles.clone().or_else(|| g.tiles.clone()),
+            header: p.header.clone().or_else(|| g.header.clone()),
+        }),
+    }
+}
+
 impl Config {
     /// Load and merge global and project configurations.
     pub fn load(cli_agent: Option<&str>) -> anyhow::Result<Self> {
@@ -2547,9 +2691,7 @@ impl Config {
         }
 
         if !defaults_root.as_os_str().is_empty() {
-            let has_node_modules = defaults_root.join("pnpm-lock.yaml").exists()
-                || defaults_root.join("package-lock.json").exists()
-                || defaults_root.join("yarn.lock").exists();
+            let has_node_modules = has_node_lockfile(defaults_root);
 
             if config.panes.is_none() && config.windows.is_none() {
                 if defaults_root.join("CLAUDE.md").exists() || has_explicit_agent {
@@ -2567,6 +2709,16 @@ impl Config {
                 config.panes = Some(Self::agent_default_panes());
             } else {
                 config.panes = Some(Self::default_panes());
+            }
+        }
+
+        // Runs after the merge so the placeholder is expanded wherever it came
+        // from, including entries spliced in from the global config.
+        if let Some(hooks) = config.pre_remove.as_mut() {
+            for hook in hooks.iter_mut() {
+                if hook.trim() == CLEANUP_NODE_MODULES_PLACEHOLDER {
+                    *hook = NODE_MODULES_CLEANUP_SCRIPT.to_string();
+                }
             }
         }
 
@@ -2756,6 +2908,9 @@ impl Config {
         // Special case: mode (project wins if explicitly set)
         merged.mode = project.mode.or(self.mode);
 
+        // Special case: default_session (project wins if explicitly set)
+        merged.default_session = project.default_session.or(self.default_session);
+
         // Special case: window_placement (project wins if explicitly set)
         merged.window_placement = project.window_placement.or(self.window_placement);
 
@@ -2817,11 +2972,10 @@ impl Config {
                     .item_width
                     .or(self.sidebar.horizontal.item_width),
             },
-            templates: project
-                .sidebar
-                .templates
-                .clone()
-                .or(self.sidebar.templates.clone()),
+            templates: merge_sidebar_templates(
+                self.sidebar.templates.as_ref(),
+                project.sidebar.templates.as_ref(),
+            ),
             agent_icons: match (
                 self.sidebar.agent_icons.clone(),
                 project.sidebar.agent_icons.clone(),
@@ -2833,7 +2987,12 @@ impl Config {
                 (g, p) => p.or(g),
             },
             sort: project.sidebar.sort.or(self.sidebar.sort),
+            group_by: project.sidebar.group_by.or(self.sidebar.group_by),
             dim_stale: project.sidebar.dim_stale.or(self.sidebar.dim_stale),
+            collapse_stale: project
+                .sidebar
+                .collapse_stale
+                .or(self.sidebar.collapse_stale),
         };
 
         // Sandbox config: per-field override with nested struct merging
@@ -3049,6 +3208,15 @@ impl Config {
         self.mode.unwrap_or(MuxMode::Window)
     }
 
+    /// Session to return to when a workmux-managed session closes.
+    /// Blank values are treated as unset.
+    pub fn default_session(&self) -> Option<&str> {
+        self.default_session
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    }
+
     /// Get the window placement strategy.
     pub fn window_placement(&self) -> WindowPlacement {
         self.window_placement.unwrap_or_default()
@@ -3157,6 +3325,11 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # - session: Create tmux sessions for each worktree
 # mode: session
 
+# Session mode only. Session to return to when a workmux session is closed or
+# removed, instead of whichever session the client was in previously.
+# Not prefixed with window_prefix. Default: the client's previous session.
+# default_session: main
+
 # Placement for new tmux windows in window mode.
 # Options: after_current (default), rightmost
 # window_placement: rightmost
@@ -3249,6 +3422,9 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # Commands to run before worktree removal (during merge or remove).
 # Useful for backing up gitignored files before cleanup.
 # Default: Auto-detects Node.js projects and fast-deletes node_modules.
+# Detection looks for a lockfile at the project root or in a direct subdirectory.
+# Defining any command here replaces that default; use "<cleanup-node-modules>"
+# to keep the fast cleanup alongside your own commands.
 # Use "<global>" to inherit from global config.
 # Set to empty list to disable: `pre_remove: []`
 # Environment variables available:
@@ -3259,6 +3435,7 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #   - "<global>"
 #   - mkdir -p "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE"
 #   - cp -r test-results/ "$WM_PROJECT_ROOT/artifacts/$WM_HANDLE/"
+#   - "<cleanup-node-modules>"
 
 #-------------------------------------------------------------------------------
 # Files
@@ -3319,8 +3496,20 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #   # Default: "tiles". Can be toggled at runtime with 'v' key.
 #   layout: tiles
 #
+#   # Row ordering: "recency" (default), "priority" or "window".
+#   sort: recency
+#
+#   # Group agents into labeled sections: "project" or "session". Unset keeps
+#   # one flat list; the 't' key switches at runtime. Headers are rendered only
+#   # in left sidebars.
+#   group_by: project
+#
 #   # Dim agents whose sidebar activity state is older than one hour. Default: true.
 #   dim_stale: true
+#
+#   # While grouped, fold each group's stale agents behind a toggle and move
+#   # groups holding nothing but stale agents below the rest. Default: true.
+#   collapse_stale: true
 #
 #   horizontal:
 #     item_width: 24  # horizontal chip width in columns, clamped 12-80
@@ -3330,6 +3519,14 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #       - "{status_icon} {primary} {pane_suffix} {fill} {elapsed}"
 #       - "{secondary} {fill} {git_stats}"
 #       - "{pane_title}"
+#     # Used while grouping is on. Anything left out falls back to the template
+#     # above it, then to the built-in grouped default.
+#     grouped:
+#       # Group header row; accepts {group}, {group_count}, {fill} and #[...].
+#       header: "{group} {fill} {group_count}"
+#       tiles:
+#         - "{primary} {pane_suffix} {fill} {pr_number} {pr_checks} {elapsed}"
+#         - "{pane_title} {fill} {git_stats}"
 
 #-------------------------------------------------------------------------------
 # Sandbox
@@ -3466,15 +3663,63 @@ mod tests {
 
     use super::{
         AgentColumn, AgentEnvValue, AgentIconConfig, AgentIconDetails, AllowedDomainDetails,
-        AllowedDomainEntry, Config, ContainerConfig, ContainerDevice, DEFAULT_AGENT_COLUMNS,
-        DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig, LayoutConfig, LimaConfig, NetworkConfig,
-        NetworkPolicy, PaneConfig, SandboxConfig, SandboxRuntime, SandboxTarget, SidebarHeight,
-        SidebarPosition, SidebarWidth, SplitDirection, ToolchainMode, WindowPlacement,
-        WorktreeColumn, is_agent_command, validate_domain, validate_group_add_entry,
-        validate_layouts_config,
+        AllowedDomainEntry, CLEANUP_NODE_MODULES_PLACEHOLDER, Config, ContainerConfig,
+        ContainerDevice, DEFAULT_AGENT_COLUMNS, DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig,
+        LayoutConfig, LimaConfig, NODE_MODULES_CLEANUP_SCRIPT, NetworkConfig, NetworkPolicy,
+        PaneConfig, SandboxConfig, SandboxRuntime, SandboxTarget, SidebarHeight, SidebarPosition,
+        SidebarWidth, SplitDirection, ToolchainMode, WindowPlacement, WorktreeColumn,
+        is_agent_command, validate_domain, validate_group_add_entry, validate_layouts_config,
     };
     use crate::test_support;
     use tempfile::TempDir;
+
+    #[test]
+    fn default_session_is_none_by_default() {
+        assert_eq!(Config::default().default_session(), None);
+    }
+
+    #[test]
+    fn default_session_parses_from_config() {
+        let config: Config =
+            serde_yaml::from_str("default_session: main\n").expect("config parses");
+        assert_eq!(config.default_session(), Some("main"));
+    }
+
+    #[test]
+    fn default_session_treats_blank_value_as_unset() {
+        let config: Config =
+            serde_yaml::from_str("default_session: \"   \"\n").expect("config parses");
+        assert_eq!(config.default_session(), None);
+    }
+
+    #[test]
+    fn default_session_trims_surrounding_whitespace() {
+        let config: Config =
+            serde_yaml::from_str("default_session: \" my main \"\n").expect("config parses");
+        assert_eq!(config.default_session(), Some("my main"));
+    }
+
+    #[test]
+    fn default_session_project_value_overrides_global() {
+        let global: Config =
+            serde_yaml::from_str("default_session: global-main\n").expect("global config parses");
+        let project: Config =
+            serde_yaml::from_str("default_session: project-main\n").expect("project config parses");
+        assert_eq!(
+            global.merge(project).default_session(),
+            Some("project-main")
+        );
+    }
+
+    #[test]
+    fn default_session_inherits_global_value() {
+        let global: Config =
+            serde_yaml::from_str("default_session: global-main\n").expect("global config parses");
+        assert_eq!(
+            global.merge(Config::default()).default_session(),
+            Some("global-main")
+        );
+    }
 
     #[test]
     fn dashboard_closes_on_jump_by_default() {
@@ -3525,7 +3770,7 @@ mod tests {
     #[test]
     fn agent_columns_follow_configured_order() {
         let config: Config = serde_yaml::from_str(
-            "dashboard:\n  agent_columns: [title, status, number, worktree, git, pr, project, time]\n",
+            "dashboard:\n  agent_columns: [title, status, number, worktree, git, pr, window, project, time]\n",
         )
         .expect("config parses");
         assert_eq!(
@@ -3537,6 +3782,7 @@ mod tests {
                 AgentColumn::Worktree,
                 AgentColumn::Git,
                 AgentColumn::Pr,
+                AgentColumn::Window,
                 AgentColumn::Project,
                 AgentColumn::Time
             ]
@@ -3922,6 +4168,121 @@ mod tests {
         assert_eq!(disabled.merge_keep, Some(false));
     }
 
+    fn pre_remove_default_for_root(root: &std::path::Path) -> Option<Vec<String>> {
+        Config::merge_and_apply_defaults(Config::default(), Config::default(), None, root)
+            .unwrap()
+            .pre_remove
+    }
+
+    #[test]
+    fn node_modules_cleanup_detects_lockfile_at_root() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("pnpm-lock.yaml"), "").unwrap();
+
+        assert_eq!(
+            pre_remove_default_for_root(root.path()),
+            Some(vec![NODE_MODULES_CLEANUP_SCRIPT.to_string()])
+        );
+    }
+
+    #[test]
+    fn node_modules_cleanup_detects_lockfile_in_subdirectory() {
+        let root = tempfile::tempdir().unwrap();
+        let dashboard = root.path().join("dashboard");
+        std::fs::create_dir(&dashboard).unwrap();
+        std::fs::write(dashboard.join("pnpm-lock.yaml"), "").unwrap();
+
+        assert_eq!(
+            pre_remove_default_for_root(root.path()),
+            Some(vec![NODE_MODULES_CLEANUP_SCRIPT.to_string()])
+        );
+    }
+
+    #[test]
+    fn node_modules_cleanup_ignores_lockfiles_below_depth_one() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("packages").join("app");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("yarn.lock"), "").unwrap();
+
+        assert_eq!(pre_remove_default_for_root(root.path()), None);
+    }
+
+    #[test]
+    fn node_modules_cleanup_ignores_lockfiles_in_hidden_dirs_and_node_modules() {
+        let root = tempfile::tempdir().unwrap();
+        for dir in [".cache", "node_modules"] {
+            let dir = root.path().join(dir);
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("package-lock.json"), "").unwrap();
+        }
+
+        assert_eq!(pre_remove_default_for_root(root.path()), None);
+    }
+
+    #[test]
+    fn node_modules_cleanup_does_not_override_configured_pre_remove() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("yarn.lock"), "").unwrap();
+        let project = Config {
+            pre_remove: Some(vec![]),
+            ..Default::default()
+        };
+
+        let config =
+            Config::merge_and_apply_defaults(Config::default(), project, None, root.path())
+                .unwrap();
+
+        assert_eq!(config.pre_remove, Some(vec![]));
+    }
+
+    #[test]
+    fn cleanup_node_modules_placeholder_expands_to_builtin_script() {
+        let root = tempfile::tempdir().unwrap();
+        let project = Config {
+            pre_remove: Some(vec![
+                "cp -r test-results/ /tmp/out".to_string(),
+                CLEANUP_NODE_MODULES_PLACEHOLDER.to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let config =
+            Config::merge_and_apply_defaults(Config::default(), project, None, root.path())
+                .unwrap();
+
+        assert_eq!(
+            config.pre_remove,
+            Some(vec![
+                "cp -r test-results/ /tmp/out".to_string(),
+                NODE_MODULES_CLEANUP_SCRIPT.to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn cleanup_node_modules_placeholder_expands_when_inherited_from_global() {
+        let root = tempfile::tempdir().unwrap();
+        let global = Config {
+            pre_remove: Some(vec![CLEANUP_NODE_MODULES_PLACEHOLDER.to_string()]),
+            ..Default::default()
+        };
+        let project = Config {
+            pre_remove: Some(vec!["<global>".to_string(), "echo done".to_string()]),
+            ..Default::default()
+        };
+
+        let config = Config::merge_and_apply_defaults(global, project, None, root.path()).unwrap();
+
+        assert_eq!(
+            config.pre_remove,
+            Some(vec![
+                NODE_MODULES_CLEANUP_SCRIPT.to_string(),
+                "echo done".to_string(),
+            ])
+        );
+    }
+
     #[test]
     fn hook_shell_defaults_to_bash_c() {
         let config = Config::merge_and_apply_defaults(
@@ -4203,6 +4564,41 @@ sidebar:
         assert_eq!(merged.sidebar.width, Some(SidebarWidth::Absolute(40)));
         assert_eq!(merged.sidebar.height, Some(SidebarHeight::Absolute(4)));
         assert_eq!(merged.sidebar.horizontal.item_width, Some(36));
+    }
+
+    #[test]
+    fn sidebar_grouping_is_opt_in_and_brings_folding_with_it() {
+        let default_config = Config::default();
+        assert_eq!(default_config.sidebar.group_by(), None);
+
+        let grouped: Config = serde_yaml::from_str("sidebar:\n  group_by: project\n").unwrap();
+        assert_eq!(
+            grouped.sidebar.group_by(),
+            Some(super::SidebarGroupBy::Project)
+        );
+        assert!(grouped.sidebar.collapse_stale());
+
+        let unfolded: Config = serde_yaml::from_str(
+            r#"
+sidebar:
+  group_by: session
+  collapse_stale: false
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            unfolded.sidebar.group_by(),
+            Some(super::SidebarGroupBy::Session)
+        );
+        assert!(!unfolded.sidebar.collapse_stale());
+
+        for raw in [
+            "sidebar:\n  group_by: none\n",
+            "sidebar:\n  group_by: off\n",
+        ] {
+            let off: Config = serde_yaml::from_str(raw).unwrap();
+            assert_eq!(off.sidebar.group_by(), None);
+        }
     }
 
     #[test]
@@ -6267,6 +6663,70 @@ panes:
     }
 
     #[test]
+    fn target_deserializes_from_yaml() {
+        let yaml = r#"
+panes:
+  - command: vim
+    focus: true
+  - command: pnpm install
+    split: vertical
+    size: 15
+  - command: echo hi
+    split: horizontal
+    target: 0
+"#;
+        let config: super::Config = serde_yaml::from_str(yaml).unwrap();
+        let panes = config.panes.unwrap();
+        assert_eq!(panes[1].size, Some(15));
+        assert_eq!(panes[2].target, Some(0));
+        assert_eq!(panes[2].size, None);
+    }
+
+    #[test]
+    fn validate_panes_target_can_reference_previous_pane() {
+        let panes = vec![
+            PaneConfig {
+                command: Some("vim".to_string()),
+                focus: true,
+                ..Default::default()
+            },
+            PaneConfig {
+                command: Some("hi".to_string()),
+                split: Some(SplitDirection::Horizontal),
+                ..Default::default()
+            },
+            PaneConfig {
+                command: Some("pnpm install".to_string()),
+                split: Some(SplitDirection::Vertical),
+                size: Some(15),
+                target: Some(0),
+                ..Default::default()
+            },
+        ];
+
+        assert!(super::validate_panes_config(&panes).is_ok());
+    }
+
+    #[test]
+    fn validate_panes_target_must_reference_existing_pane() {
+        let panes = vec![
+            PaneConfig {
+                command: Some("nvim".to_string()),
+                ..Default::default()
+            },
+            PaneConfig {
+                command: Some("make install".to_string()),
+                split: Some(SplitDirection::Vertical),
+                target: Some(1),
+                ..Default::default()
+            },
+        ];
+
+        let err = super::validate_panes_config(&panes).unwrap_err();
+        assert!(err.to_string().contains("invalid target 1"));
+    }
+
+    #[test]
     fn validate_layouts_invalid_first_pane_has_split() {
         let mut layouts = HashMap::new();
         layouts.insert(
@@ -6284,6 +6744,48 @@ panes:
             "error should mention layout name: {}",
             err
         );
+    }
+
+    #[test]
+    fn merge_sidebar_templates_inherits_unset_fields() {
+        let mut global = Config::default();
+        global.sidebar.templates = Some(crate::config::TemplatesConfig {
+            compact: Some("{primary}".into()),
+            tiles: Some(vec!["{primary}".into()]),
+            horizontal: Some(vec!["{secondary}".into()]),
+            grouped: Some(crate::config::GroupedTemplatesConfig {
+                header: Some("{group}".into()),
+                tiles: Some(vec!["{primary}".into()]),
+                ..Default::default()
+            }),
+        });
+        let mut project = Config::default();
+        project.sidebar.templates = Some(crate::config::TemplatesConfig {
+            grouped: Some(crate::config::GroupedTemplatesConfig {
+                tiles: Some(vec!["{pane_title}".into()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+        let templates = global.merge(project).sidebar.templates.unwrap();
+        assert_eq!(templates.compact.as_deref(), Some("{primary}"));
+        assert_eq!(templates.tiles, Some(vec!["{primary}".to_string()]));
+        assert_eq!(templates.horizontal, Some(vec!["{secondary}".to_string()]));
+
+        // The grouped block merges per field too, so overriding its rows keeps
+        // the inherited header.
+        let grouped = templates.grouped.unwrap();
+        assert_eq!(grouped.header.as_deref(), Some("{group}"));
+        assert_eq!(grouped.tiles, Some(vec!["{pane_title}".to_string()]));
+    }
+
+    #[test]
+    fn sidebar_grouping_and_sort_reject_unknown_values() {
+        let error = serde_yaml::from_str::<Config>("sidebar:\n  group_by: proj\n").unwrap_err();
+        assert!(error.to_string().contains("unknown variant"));
+        let error = serde_yaml::from_str::<Config>("sidebar:\n  sort: urgency\n").unwrap_err();
+        assert!(error.to_string().contains("unknown variant"));
     }
 
     #[test]

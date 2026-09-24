@@ -52,6 +52,7 @@ Hooks receive `WM_CONFIG_DIR` pointing to the config directory in the new worktr
 ```yaml
 # backend/.workmux.yaml
 post_create:
+  - echo "Project root: $WM_PROJECT_ROOT" # /path/to/main-worktree
   - echo "Config dir: $WM_CONFIG_DIR" # /path/to/worktree/backend
   - echo "Worktree root: $WM_WORKTREE_PATH" # /path/to/worktree
 ```

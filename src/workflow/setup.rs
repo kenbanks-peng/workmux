@@ -7,7 +7,7 @@ use crate::multiplexer::{
     CreateSessionParams, CreateWindowInSessionParams, CreateWindowParams, Multiplexer,
     PaneSetupOptions,
 };
-use crate::{cmd, config, git, prompt::Prompt};
+use crate::{cmd, config, prompt::Prompt};
 use tracing::{debug, info};
 
 use super::file_ops::{handle_file_operations, symlink_claude_local_md};
@@ -29,21 +29,18 @@ pub fn provision_environment(
     branch_name: &str,
     handle: &str,
     worktree_path: &Path,
+    project_root: &Path,
     config: &config::Config,
     options: &super::types::SetupOptions,
     hook_output: cmd::ShellOutput,
 ) -> Result<ProvisionedEnvironment> {
-    let repo_root = match &options.config_root {
-        Some(path) => path.clone(),
-        None => git::get_main_worktree_root()?,
-    };
     let effective_working_dir = options.working_dir.as_deref().unwrap_or(worktree_path);
-    let file_ops_source = options.config_root.as_deref().unwrap_or(&repo_root);
+    let file_ops_source = options.config_root.as_deref().unwrap_or(project_root);
 
     if options.run_file_ops {
         handle_file_operations(file_ops_source, effective_working_dir, &config.files)
             .context("Failed to perform file operations")?;
-        symlink_claude_local_md(&repo_root, effective_working_dir)
+        symlink_claude_local_md(file_ops_source, effective_working_dir)
             .context("Failed to auto-symlink CLAUDE.local.md")?;
         debug!(
             branch = branch_name,
@@ -60,9 +57,9 @@ pub fn provision_environment(
         let abs_worktree_path = worktree_path
             .canonicalize()
             .unwrap_or_else(|_| worktree_path.to_path_buf());
-        let abs_project_root = repo_root
+        let abs_project_root = project_root
             .canonicalize()
-            .unwrap_or_else(|_| repo_root.clone());
+            .unwrap_or_else(|_| project_root.to_path_buf());
         let abs_config_dir = effective_working_dir
             .canonicalize()
             .unwrap_or_else(|_| effective_working_dir.to_path_buf());
@@ -103,6 +100,7 @@ pub fn setup_environment(
     branch_name: &str,
     handle: &str,
     worktree_path: &Path,
+    project_root: &Path,
     config: &config::Config,
     options: &super::types::SetupOptions,
     agent: Option<&str>,
@@ -121,6 +119,7 @@ pub fn setup_environment(
         branch_name,
         handle,
         worktree_path,
+        project_root,
         config,
         options,
         cmd::ShellOutput::Inherit,

@@ -2,12 +2,14 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ..conftest import MuxEnvironment, write_workmux_config
 
@@ -78,6 +80,62 @@ def test_headless_add_emits_json_and_creates_no_mux_target(
         cwd=mux_repo_path,
     )
     assert attachment.stdout.strip() == "headless"
+
+
+def test_headless_config_outside_repo_uses_git_project_root(
+    mux_server: MuxEnvironment,
+    workmux_exe_path: Path,
+    mux_repo_path: Path,
+    tmp_path: Path,
+):
+    branch = "external-config-root-a1b2c3d4"
+    external_dir = tmp_path.parent / f"{tmp_path.name}-config"
+    external_dir.mkdir()
+    config_path = external_dir / "alternate.yaml"
+    hook_env_path = external_dir / "hook-env.txt"
+    git_root_path = external_dir / "git-root.txt"
+    source_name = "config-source.txt"
+    (external_dir / source_name).write_text("external config source\n")
+    (mux_repo_path / source_name).write_text("project source\n")
+    hook = (
+        "printf '%s\\n%s\\n%s\\n%s\\n' "
+        '"$WM_PROJECT_ROOT" "$WM_CONFIG_DIR" "$WM_WORKTREE_PATH" "$PWD" '
+        f"> {shlex.quote(str(hook_env_path))}; "
+        'git -C "$WM_PROJECT_ROOT" rev-parse --show-toplevel '
+        f"> {shlex.quote(str(git_root_path))}"
+    )
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "files": {"copy": [source_name]},
+                "post_create": [hook],
+            }
+        )
+    )
+
+    result = run_headless(
+        mux_server,
+        workmux_exe_path,
+        mux_repo_path,
+        branch,
+        "--name",
+        branch,
+        "--config",
+        str(config_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(result.stdout)
+    worktree = Path(receipt["worktree_path"])
+    project_root, config_dir, worktree_path, hook_cwd = map(
+        Path, hook_env_path.read_text().splitlines()
+    )
+    assert project_root.resolve() == mux_repo_path.resolve()
+    assert Path(git_root_path.read_text().strip()).resolve() == mux_repo_path.resolve()
+    assert config_dir.resolve() == worktree.resolve()
+    assert worktree_path.resolve() == worktree.resolve()
+    assert hook_cwd.resolve() == worktree.resolve()
+    assert (worktree / source_name).read_text() == "external config source\n"
 
 
 def test_headless_add_rolls_back_failed_provisioning(
