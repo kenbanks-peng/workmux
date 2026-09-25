@@ -109,7 +109,33 @@ describe('pi workmux status extension', () => {
     const harness = await createHarness();
     expect(harness.calls).toEqual([['register-agent']]);
     await harness.emit('session_shutdown');
-    expect(harness.statuses).toEqual([]);
+    expect(harness.statuses).toEqual(['clear']);
+  });
+
+  test.each(['working', 'done', 'aborted'])('shutdown clears %s without a publisher', async (state) => {
+    const harness = await createHarness(state === 'aborted' ? abortedMessages[0] : stoppedMessage());
+    await harness.emit('agent_start');
+    if (state !== 'working') await harness.emit('agent_settled');
+    await harness.emit('session_shutdown');
+    expect(harness.statuses.at(-1)).toBe('clear');
+    await harness.emit('agent_settled');
+    await harness.emit('session_shutdown');
+    expect(harness.statuses.filter((status) => status === 'clear')).toHaveLength(1);
+    expect(harness.statuses.at(-1)).toBe('clear');
+  });
+
+  test.each(['reject', 'nonzero'])('shutdown tolerates a %s clear failure', async (failure) => {
+    const harness = await createHarness(stoppedMessage(), {
+      async exec(args) {
+        if (args[1] === 'clear') {
+          if (failure === 'reject') throw new Error('workmux unavailable');
+          return 1;
+        }
+        return 0;
+      },
+    });
+    await harness.emit('session_shutdown');
+    expect(harness.calls.at(-1)).toEqual(['set-window-status', 'clear']);
   });
 
   test('reports done only after the full agent run settles', async () => {
@@ -326,7 +352,7 @@ describe('pi workmux status extension', () => {
     await shutdown;
     await harness.flush();
     await harness.emit('session_shutdown');
-    expect(harness.statuses).toEqual(['working', 'done']);
+    expect(harness.statuses).toEqual(['working', 'clear']);
   });
 
   test('session replacement discards child counts and ordinary abort behavior returns', async () => {
@@ -336,7 +362,7 @@ describe('pi workmux status extension', () => {
     await harness.emit('session_start');
     await harness.emit('agent_start');
     await harness.emit('agent_settled');
-    expect(harness.statuses).toEqual(['working', 'done', 'working']);
+    expect(harness.statuses).toEqual(['working', 'clear', 'working']);
     expect(harness.listeners.get('suba:activity')!.size).toBe(1);
   });
 
@@ -344,7 +370,7 @@ describe('pi workmux status extension', () => {
     const harness = await createHarness(stoppedMessage(), { snapshot: 2 });
     await harness.emit('session_shutdown');
     await harness.emit('session_start');
-    expect(harness.statuses).toEqual(['working', 'done', 'working']);
+    expect(harness.statuses).toEqual(['working', 'clear', 'working']);
     expect(harness.listeners.get('suba:activity')!.size).toBe(1);
     await harness.activity(0);
     expect(harness.statuses.at(-1)).toBe('done');

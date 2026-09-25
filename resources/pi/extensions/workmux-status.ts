@@ -99,7 +99,10 @@ export default function (pi: ExtensionAPI) {
     unsubscribe = undefined;
     const wasActive = sessionActive;
     sessionActive = false;
-    if (wasActive && activeCount !== undefined) await setStatus("done");
+    // Release the explicit agent report, not just its activity status. Herdr
+    // otherwise keeps displaying the agent after its process exits. Queue the
+    // clear after pending writes so an older update cannot restore the report.
+    if (wasActive) await setStatus("clear");
     await writes;
   });
 }
