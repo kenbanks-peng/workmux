@@ -74,6 +74,9 @@ Configure the sidebar in your global `~/.config/workmux/config.yaml` or project
 `.workmux.yaml`:
 
 ```yaml
+# Shared by the dashboard and sidebar; defaults to one hour.
+stale_after: 5h # integer seconds or a duration such as 90m or 5h
+
 sidebar:
   # Position: "left" (default) or "top"
   position: left
@@ -85,7 +88,7 @@ sidebar:
   # Layout mode for the left sidebar: "compact" or "tiles" (default)
   layout: tiles
 
-  # Dim agents whose status has not changed for one hour (default: true)
+  # Dim stale agents (default: true; uses the shared stale_after threshold)
   dim_stale: true
 
   # Row ordering: "recency" (default), "priority" or "window"
@@ -242,9 +245,9 @@ so a sidebar you have already customized keeps its rows when you group it. See
 
 While grouped, each group's stale agents fold behind one toggle row that says
 how many it stands for, so a project nobody is waiting on costs a line instead
-of a screen. An agent counts as stale once it is sleeping, or once an hour
-passes with no activity and no working or waiting status: the same agents
-`dim_stale` dims.
+of a screen. An agent counts as stale once it is sleeping, or once the configured
+`stale_after` period passes with no activity and no working or waiting status:
+the same agents `dim_stale` dims and the dashboard marks or filters out.
 
 Set `collapse_stale: false` to list every agent at full height instead:
 

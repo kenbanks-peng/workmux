@@ -70,6 +70,9 @@ pub struct SidebarSnapshot {
     /// that folded differently would number rows the list does not carry.
     #[serde(default)]
     pub collapse_stale: bool,
+    /// Stale timeout selected by the daemon for this snapshot.
+    #[serde(default = "default_stale_threshold_secs")]
+    pub stale_threshold_secs: u64,
     pub agents: Vec<AgentPane>,
     /// Increments whenever the daemon reloads the merged config.
     /// Clients use this to trigger their own per-project config reload.
@@ -81,7 +84,11 @@ pub struct SidebarSnapshot {
 pub const UNKNOWN_GROUP_LABEL: &str = "(unknown)";
 
 /// Seconds of inactivity after which an agent counts as stale for ordering.
-pub const STALE_THRESHOLD_SECS: u64 = 60 * 60;
+pub const STALE_THRESHOLD_SECS: u64 = crate::config::DEFAULT_STALE_AFTER_SECS;
+
+fn default_stale_threshold_secs() -> u64 {
+    STALE_THRESHOLD_SECS
+}
 
 /// The group an agent belongs to under the given grouping mode.
 pub fn group_label(agent: &AgentPane, group_by: SidebarGroupBy) -> String {
@@ -126,33 +133,47 @@ fn activity_age(agent: &AgentPane, now: u64) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+#[derive(Clone, Copy)]
+struct StalenessContext<'a> {
+    sleeping: &'a HashSet<String>,
+    interrupted: &'a HashSet<String>,
+    stale_threshold_secs: u64,
+}
+
+impl StalenessContext<'_> {
+    fn is_stale(&self, agent: &AgentPane, now: u64) -> bool {
+        crate::command::sidebar::template::context::agent_is_stale(
+            agent,
+            now,
+            self.stale_threshold_secs,
+            self.sleeping.contains(&agent.pane_id),
+            self.interrupted.contains(&agent.pane_id),
+        )
+    }
+}
+
 /// Attention category for `SidebarSort::Priority`, lower is more urgent.
 ///
 /// Waiting and done agents stay actionable no matter how long they have
 /// waited. Working agents demote only when interruption detection says they
 /// stopped progressing; unknown agents demote on activity age. Sleeping
 /// overrides every other status.
-fn priority_category(
-    agent: &AgentPane,
-    now: u64,
-    sleeping: &HashSet<String>,
-    interrupted: &HashSet<String>,
-) -> u8 {
-    if sleeping.contains(&agent.pane_id) {
+fn priority_category(agent: &AgentPane, now: u64, staleness: &StalenessContext<'_>) -> u8 {
+    if staleness.sleeping.contains(&agent.pane_id) {
         return 5;
     }
     match agent.status {
         Some(AgentStatus::Waiting) => 0,
         Some(AgentStatus::Done) => 1,
         Some(AgentStatus::Working) => {
-            if interrupted.contains(&agent.pane_id) {
+            if staleness.interrupted.contains(&agent.pane_id) {
                 4
             } else {
                 2
             }
         }
         None => {
-            if activity_age(agent, now) > STALE_THRESHOLD_SECS {
+            if staleness.is_stale(agent, now) {
                 4
             } else {
                 3
@@ -168,8 +189,7 @@ fn dormant_groups(
     agents: &[AgentPane],
     group_by: Option<SidebarGroupBy>,
     now: u64,
-    sleeping: &HashSet<String>,
-    interrupted: &HashSet<String>,
+    staleness: &StalenessContext<'_>,
 ) -> HashSet<String> {
     let Some(mode) = group_by else {
         return HashSet::new();
@@ -178,13 +198,7 @@ fn dormant_groups(
     let mut live = HashSet::new();
     for agent in agents {
         let label = group_label(agent, mode);
-        if !crate::command::sidebar::template::context::agent_is_stale(
-            agent,
-            now,
-            STALE_THRESHOLD_SECS,
-            sleeping.contains(&agent.pane_id),
-            interrupted.contains(&agent.pane_id),
-        ) {
+        if !staleness.is_stale(agent, now) {
             live.insert(label.clone());
         }
         all.insert(label);
@@ -197,17 +211,16 @@ fn dormant_groups(
 /// ordering within each group. Grouping only prefixes the key, so an agent can
 /// never leave its group. Ordering stays with the daemon so the published pane
 /// list, `{idx}` and `workmux sidebar jump` agree with what clients draw.
-pub(crate) fn order_agents(
+fn order_agents(
     agents: &mut [AgentPane],
     group_by: Option<SidebarGroupBy>,
     sort: SidebarSort,
     now: u64,
-    sleeping: &HashSet<String>,
-    interrupted: &HashSet<String>,
+    staleness: &StalenessContext<'_>,
     sink_dormant_groups: bool,
 ) {
     let dormant = if sink_dormant_groups {
-        dormant_groups(agents, group_by, now, sleeping, interrupted)
+        dormant_groups(agents, group_by, now, staleness)
     } else {
         HashSet::new()
     };
@@ -216,21 +229,14 @@ pub(crate) fn order_agents(
     // the configured sort does.
     let group_sort_key = |agent: &AgentPane| {
         let (lower, label) = group_sort_key(agent, group_by);
-        let stale = sink_dormant_groups
-            && crate::command::sidebar::template::context::agent_is_stale(
-                agent,
-                now,
-                STALE_THRESHOLD_SECS,
-                sleeping.contains(&agent.pane_id),
-                interrupted.contains(&agent.pane_id),
-            );
+        let stale = sink_dormant_groups && staleness.is_stale(agent, now);
         (dormant.contains(&label), lower, label, stale)
     };
     match sort {
         SidebarSort::Recency => agents.sort_by_cached_key(|a| {
             (
                 group_sort_key(a),
-                sleeping.contains(&a.pane_id),
+                staleness.sleeping.contains(&a.pane_id),
                 activity_age(a, now),
                 pane_num(a),
             )
@@ -238,7 +244,7 @@ pub(crate) fn order_agents(
         SidebarSort::Priority => agents.sort_by_cached_key(|a| {
             (
                 group_sort_key(a),
-                priority_category(a, now, sleeping, interrupted),
+                priority_category(a, now, staleness),
                 activity_age(a, now),
                 pane_num(a),
             )
@@ -288,6 +294,7 @@ pub(crate) struct SnapshotInputs {
     /// Sink groups holding no live work below the rest, matching the client's
     /// collapsed rendering of stale agents.
     pub collapse_stale: bool,
+    pub stale_threshold_secs: Option<u64>,
     pub expanded_groups: Vec<String>,
     pub status_icons: StatusIcons,
     pub git_statuses: HashMap<PathBuf, GitStatus>,
@@ -313,6 +320,7 @@ pub(crate) fn build_snapshot(input: SnapshotInputs) -> SidebarSnapshot {
         sort,
         group_by,
         collapse_stale,
+        stale_threshold_secs,
         expanded_groups,
         status_icons,
         git_statuses,
@@ -354,13 +362,15 @@ pub(crate) fn build_snapshot(input: SnapshotInputs) -> SidebarSnapshot {
         .unwrap_or_default()
         .as_secs();
 
+    let stale_threshold_secs = stale_threshold_secs.unwrap_or(STALE_THRESHOLD_SECS);
+
     let stale_pane_ids: HashSet<String> = agents
         .iter()
         .filter(|agent| {
             crate::command::sidebar::template::context::agent_is_stale(
                 agent,
                 now,
-                STALE_THRESHOLD_SECS,
+                stale_threshold_secs,
                 sleeping_pane_ids.contains(&agent.pane_id),
                 interrupted_pane_ids.contains(&agent.pane_id),
             )
@@ -368,15 +378,12 @@ pub(crate) fn build_snapshot(input: SnapshotInputs) -> SidebarSnapshot {
         .map(|agent| agent.pane_id.clone())
         .collect();
 
-    order_agents(
-        &mut agents,
-        group_by,
-        sort,
-        now,
-        &sleeping_pane_ids,
-        &interrupted_pane_ids,
-        collapse_stale,
-    );
+    let staleness = StalenessContext {
+        sleeping: &sleeping_pane_ids,
+        interrupted: &interrupted_pane_ids,
+        stale_threshold_secs,
+    };
+    order_agents(&mut agents, group_by, sort, now, &staleness, collapse_stale);
 
     // Prune sleeping set to only include live agents
     let live_sleeping: HashSet<String> = sleeping_pane_ids
@@ -430,6 +437,7 @@ pub(crate) fn build_snapshot(input: SnapshotInputs) -> SidebarSnapshot {
         expanded_groups,
         stale_pane_ids,
         collapse_stale,
+        stale_threshold_secs,
         agents,
         config_version: 0,
     }
@@ -594,15 +602,12 @@ mod tests {
         }
         let sleeping: HashSet<String> = sleeping.iter().map(|s| s.to_string()).collect();
         let interrupted: HashSet<String> = interrupted.iter().map(|s| s.to_string()).collect();
-        order_agents(
-            &mut agents,
-            group_by,
-            sort,
-            now,
-            &sleeping,
-            &interrupted,
-            false,
-        );
+        let staleness = StalenessContext {
+            sleeping: &sleeping,
+            interrupted: &interrupted,
+            stale_threshold_secs: STALE_THRESHOLD_SECS,
+        };
+        order_agents(&mut agents, group_by, sort, now, &staleness, false);
         order(&agents)
     }
 
@@ -708,13 +713,17 @@ mod tests {
         );
         let mut agents = grouping_fixture(NOW);
         let empty = HashSet::new();
+        let staleness = StalenessContext {
+            sleeping: &empty,
+            interrupted: &empty,
+            stale_threshold_secs: STALE_THRESHOLD_SECS,
+        };
         order_agents(
             &mut agents,
             Some(SidebarGroupBy::Project),
             SidebarSort::Priority,
             NOW + 30,
-            &empty,
-            &empty,
+            &staleness,
             false,
         );
         assert_eq!(order(&agents), first);
@@ -729,14 +738,18 @@ mod tests {
         let quiet = grouped_agent("alpha", "s", 1, 10_000, NOW);
         let empty = HashSet::new();
 
+        let staleness = StalenessContext {
+            sleeping: &empty,
+            interrupted: &empty,
+            stale_threshold_secs: STALE_THRESHOLD_SECS,
+        };
         let mut agents = vec![quiet.clone(), working.clone()];
         order_agents(
             &mut agents,
             Some(SidebarGroupBy::Project),
             SidebarSort::Priority,
             NOW,
-            &empty,
-            &empty,
+            &staleness,
             true,
         );
         assert_eq!(order(&agents), ["%2", "%1"]);
@@ -748,8 +761,7 @@ mod tests {
             Some(SidebarGroupBy::Project),
             SidebarSort::Priority,
             NOW,
-            &empty,
-            &empty,
+            &staleness,
             false,
         );
         assert_eq!(order(&agents), ["%1", "%2"]);
@@ -776,25 +788,55 @@ mod tests {
         zed.session = "zed".to_string();
         let mut agents = vec![zed, lower, upper];
         let empty = HashSet::new();
+        let staleness = StalenessContext {
+            sleeping: &empty,
+            interrupted: &empty,
+            stale_threshold_secs: STALE_THRESHOLD_SECS,
+        };
         order_agents(
             &mut agents,
             Some(SidebarGroupBy::Session),
             SidebarSort::Recency,
             NOW,
-            &empty,
-            &empty,
+            &staleness,
             false,
         );
         assert_eq!(order(&agents), ["%1", "%2", "%3"]);
     }
 
     #[test]
-    fn snapshot_without_group_by_deserializes_as_ungrouped() {
+    fn snapshot_without_group_by_or_threshold_uses_legacy_defaults() {
         let snapshot = build_snapshot(SnapshotInputs::default());
         let mut json: serde_json::Value = serde_json::to_value(&snapshot).unwrap();
-        json.as_object_mut().unwrap().remove("group_by");
+        let object = json.as_object_mut().unwrap();
+        object.remove("group_by");
+        object.remove("stale_threshold_secs");
         let restored: SidebarSnapshot = serde_json::from_value(json).unwrap();
         assert_eq!(restored.group_by, None);
+        assert_eq!(restored.stale_threshold_secs, STALE_THRESHOLD_SECS);
+    }
+
+    #[test]
+    fn configured_threshold_drives_snapshot_staleness() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut idle = agent("/tmp/api__worktrees/idle");
+        idle.activity_ts = Some(now.saturating_sub(2 * 60 * 60));
+        let snapshot = build_snapshot(SnapshotInputs {
+            agents: vec![idle.clone()],
+            stale_threshold_secs: Some(5 * 60 * 60),
+            ..Default::default()
+        });
+        assert!(!snapshot.stale_pane_ids.contains(&idle.pane_id));
+        assert_eq!(snapshot.stale_threshold_secs, 5 * 60 * 60);
+
+        let default_snapshot = build_snapshot(SnapshotInputs {
+            agents: vec![idle.clone()],
+            ..Default::default()
+        });
+        assert!(default_snapshot.stale_pane_ids.contains(&idle.pane_id));
     }
 
     #[test]
