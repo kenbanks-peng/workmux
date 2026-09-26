@@ -23,6 +23,11 @@ pub enum AppEvent {
     WorktreeList(Vec<WorktreeInfo>),
     /// Git log preview for a worktree path
     WorktreeLog(PathBuf, String),
+    /// Result of a confirmed background removal.
+    RemoveWorktreeResult(
+        PathBuf,
+        Result<crate::workflow::types::RemoveResult, String>,
+    ),
     /// Result of a background add-worktree operation
     AddWorktreeResult(Result<String, String>),
     /// Result of fetching open PRs for the add-worktree modal
@@ -579,4 +584,96 @@ pub struct RemovePlan {
     pub is_unmerged: bool,
     pub keep_branch: bool,
     pub force_armed: bool,
+}
+
+/// Tracks active removals and suppresses completed rows in stale list snapshots.
+#[derive(Default)]
+pub struct WorktreeRemovals {
+    pending: HashSet<PathBuf>,
+    completed: HashSet<PathBuf>,
+}
+
+impl WorktreeRemovals {
+    pub fn contains(&self, path: &std::path::Path) -> bool {
+        self.pending.contains(path)
+    }
+
+    pub fn start(&mut self, path: PathBuf) -> bool {
+        self.pending.insert(path)
+    }
+
+    pub fn finish(&mut self, path: &std::path::Path, removed: bool) {
+        self.pending.remove(path);
+        if removed {
+            self.completed.insert(path.to_path_buf());
+        }
+    }
+
+    pub fn filter_snapshot(&mut self, worktrees: &mut Vec<WorktreeInfo>) {
+        self.completed
+            .retain(|path| worktrees.iter().any(|wt| wt.path == *path));
+        worktrees.retain(|wt| !self.completed.contains(&wt.path));
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+
+    fn worktree(path: &str) -> WorktreeInfo {
+        WorktreeInfo {
+            handle: "feature".into(),
+            branch: "feature".into(),
+            path: path.into(),
+            is_main: false,
+            mode: crate::config::MuxMode::Window,
+            has_mux_window: false,
+            has_unmerged: false,
+            pr_info: None,
+            agent_status: None,
+            created_at: None,
+            base_branch: None,
+        }
+    }
+
+    #[test]
+    fn removal_tracks_paths_and_rejects_duplicates() {
+        let mut state = WorktreeRemovals::default();
+        let first = PathBuf::from("/repo-a/feature");
+        let second = PathBuf::from("/repo-b/feature");
+        assert!(state.start(first.clone()));
+        assert!(!state.start(first.clone()));
+        assert!(state.start(second.clone()));
+        state.finish(&first, false);
+        assert!(!state.contains(&first));
+        assert!(state.contains(&second));
+        assert!(state.start(first));
+    }
+
+    #[test]
+    fn completed_removal_suppresses_stale_snapshots_until_absent() {
+        let mut state = WorktreeRemovals::default();
+        let wt = worktree("/repo/feature");
+        state.start(wt.path.clone());
+        state.finish(&wt.path, true);
+        let mut stale = vec![wt.clone()];
+        state.filter_snapshot(&mut stale);
+        assert!(stale.is_empty());
+        state.filter_snapshot(&mut Vec::new());
+        let mut recreated = vec![wt];
+        state.filter_snapshot(&mut recreated);
+        assert_eq!(recreated.len(), 1);
+    }
+
+    #[test]
+    fn failed_or_scheduled_removal_keeps_the_row() {
+        let mut state = WorktreeRemovals::default();
+        let wt = worktree("/repo/feature");
+        state.start(wt.path.clone());
+        state.finish(&wt.path, false);
+        let mut snapshot = vec![wt];
+        state.filter_snapshot(&mut snapshot);
+        assert_eq!(snapshot.len(), 1);
+        assert!(!state.contains(&snapshot[0].path));
+    }
 }

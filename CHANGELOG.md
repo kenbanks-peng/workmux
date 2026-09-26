@@ -21,6 +21,14 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
+## v0.1.267 (2026-09-25)
+
+- Configure when agents become stale in the dashboard and sidebar with
+  `stale_after`, using seconds or durations such as `90m` or `5h`.
+  ([#298](https://github.com/raine/workmux/issues/298))
+- Keep the dashboard responsive while removing worktrees, with a deleting
+  indicator and clear feedback if removal fails or continues in the background.
+
 ## v0.1.266 (2026-09-22)
 
 - Allow sidebar widths as narrow as one column for compact icon-only layouts, preserving widths below 10 columns when configured or resized. ([#297](https://github.com/raine/workmux/issues/297))

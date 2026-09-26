@@ -394,7 +394,7 @@ impl App {
         };
 
         // Block removal of main worktree
-        if worktree.is_main {
+        if worktree.is_main || self.removals.contains(&worktree.path) {
             return;
         }
 
@@ -438,18 +438,29 @@ impl App {
             return;
         }
 
-        self.do_remove_worktree(&plan.path, plan.keep_branch);
+        if !self.removals.start(plan.path.clone()) {
+            return;
+        }
+        let mux = self.mux.clone();
+        let tx = self.event_tx.clone();
+        std::thread::spawn(move || {
+            let result = remove_worktree(&plan.handle, &plan.path, plan.keep_branch, mux)
+                .map_err(|error| format!("{error:#}"));
+            let _ = tx.send(AppEvent::RemoveWorktreeResult(plan.path, result));
+        });
     }
 
-    fn do_remove_worktree(&mut self, path: &Path, keep_branch: bool) {
-        let handle = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_string();
-
-        // force=true because user confirmed via modal
-        match remove_worktree(&handle, path, keep_branch, self.mux.clone()) {
+    pub(super) fn handle_remove_worktree_result(
+        &mut self,
+        path: PathBuf,
+        result: Result<workflow::types::RemoveResult, String>,
+    ) {
+        let handle = path.file_name().unwrap_or_default().to_string_lossy();
+        let removed = result
+            .as_ref()
+            .is_ok_and(|result| !result.cleanup_scheduled);
+        self.removals.finish(&path, removed);
+        match result {
             Ok(result) if result.cleanup_scheduled => {
                 self.status_message = Some((
                     format!("Removal scheduled for '{handle}'"),
@@ -457,26 +468,17 @@ impl App {
                 ));
             }
             Ok(_) => {
-                self.worktrees.retain(|w| w.path != *path);
-
-                if self.worktrees.is_empty() {
-                    self.worktree_table_state.select(None);
-                    self.selected_worktree_path = None;
-                } else {
-                    let idx = self.worktree_table_state.selected().unwrap_or(0);
-                    let new_idx = idx.min(self.worktrees.len() - 1);
-                    self.worktree_table_state.select(Some(new_idx));
-                    self.selected_worktree_path =
-                        self.worktrees.get(new_idx).map(|w| w.path.clone());
-                }
+                self.all_worktrees.retain(|wt| wt.path != path);
+                self.apply_worktree_filters();
             }
             Err(error) => {
                 self.status_message = Some((
-                    format!("Failed to remove '{handle}': {error:#}"),
+                    format!("Failed to remove '{handle}': {error}"),
                     std::time::Instant::now(),
                 ));
             }
         }
+        self.trigger_worktree_refetch();
     }
 
     /// Close the mux window/session for the selected worktree without removing it.
@@ -488,7 +490,7 @@ impl App {
             return;
         };
 
-        if worktree.is_main || !worktree.has_mux_window {
+        if worktree.is_main || !worktree.has_mux_window || self.removals.contains(&worktree.path) {
             return;
         }
 
@@ -554,7 +556,7 @@ impl App {
         let mut candidates: Vec<SweepCandidate> = Vec::new();
 
         for wt in &self.worktrees {
-            if wt.is_main {
+            if wt.is_main || self.removals.contains(&wt.path) {
                 continue;
             }
 
@@ -935,6 +937,10 @@ impl App {
             return;
         };
 
+        if self.removals.contains(&worktree.path) {
+            return;
+        }
+
         let handle = worktree.handle.clone();
 
         let Ok(ctx) = workflow::WorkflowContext::new(self.config.clone(), self.mux.clone(), None)
@@ -961,6 +967,10 @@ impl App {
         let Some(worktree) = self.worktrees.get(selected) else {
             return;
         };
+
+        if self.removals.contains(&worktree.path) {
+            return;
+        }
 
         // Try agent pane first for direct pane targeting
         if let Some(agent) = self.all_agents.iter().find(|a| a.path == worktree.path) {

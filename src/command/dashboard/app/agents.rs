@@ -60,11 +60,17 @@ impl App {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
+            let sleeping = &self.sleeping_pane_ids;
+            let interrupted = &self.interrupted_pane_ids;
             self.agents.retain(|agent| {
-                agent
-                    .activity_ts()
-                    .map(|ts| now.saturating_sub(ts) <= threshold)
-                    .unwrap_or(true)
+                !crate::agent_staleness::is_stale(
+                    agent.activity_ts(),
+                    agent.status,
+                    now,
+                    threshold,
+                    sleeping.contains(&agent.pane_id),
+                    interrupted.contains(&agent.pane_id),
+                )
             });
         }
 
@@ -128,6 +134,8 @@ impl App {
     /// Sort agents based on the current sort mode
     fn sort_agents(&mut self) {
         let stale_threshold = self.stale_threshold_secs;
+        let sleeping = &self.sleeping_pane_ids;
+        let interrupted = &self.interrupted_pane_ids;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -136,10 +144,14 @@ impl App {
 
         // Helper closure to get status priority (lower = higher priority)
         let get_priority = |agent: &AgentPane| -> u8 {
-            let is_stale = agent
-                .activity_ts()
-                .map(|ts| now.saturating_sub(ts) > stale_threshold)
-                .unwrap_or(false);
+            let is_stale = crate::agent_staleness::is_stale(
+                agent.activity_ts(),
+                agent.status,
+                now,
+                stale_threshold,
+                sleeping.contains(&agent.pane_id),
+                interrupted.contains(&agent.pane_id),
+            );
 
             if is_stale {
                 return 4; // Stale: lowest priority
@@ -435,7 +447,14 @@ impl App {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        agent::is_stale(agent.activity_ts(), self.stale_threshold_secs, now)
+        crate::agent_staleness::is_stale(
+            agent.activity_ts(),
+            agent.status,
+            now,
+            self.stale_threshold_secs,
+            self.sleeping_pane_ids.contains(&agent.pane_id),
+            self.interrupted_pane_ids.contains(&agent.pane_id),
+        )
     }
 
     pub fn get_elapsed(&self, agent: &AgentPane) -> Option<u64> {

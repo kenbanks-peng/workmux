@@ -87,12 +87,14 @@ bind C-k run-shell "workmux sidebar prev"
 ## Configuration
 
 ```yaml
+stale_after: 5h # dashboard and sidebar timeout; default: 1h
+
 sidebar:
   position: left # "left" (default) or "top"
   width: 40 # left width in columns (default: "10%", clamped 25-50)
   # width: "15%"
   layout: tiles # left only: "compact" or "tiles" (default)
-  dim_stale: true # dim agents whose activity state is older than one hour
+  dim_stale: true # dim stale agents using stale_after
   group_by: project # "project" or "session"; unset keeps one flat list
   collapse_stale: true # while grouped, fold stale agents behind a toggle
 ```
