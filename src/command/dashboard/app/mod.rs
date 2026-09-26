@@ -13,7 +13,7 @@ pub use types::*;
 use anyhow::Result;
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
@@ -50,6 +50,8 @@ pub struct App {
     /// The directory from which the dashboard was launched (used to indicate the active worktree).
     pub current_worktree: Option<PathBuf>,
     pub stale_threshold_secs: u64,
+    /// Pane IDs manually marked as sleeping in the current tmux server.
+    pub sleeping_pane_ids: HashSet<String>,
     pub config: Config,
     pub should_quit: bool,
     pub should_jump: bool,
@@ -132,6 +134,7 @@ pub struct App {
     pub worktree_sort_mode: WorktreeSortMode,
     /// Pending worktree removal (shown in confirmation modal)
     pub pending_remove: Option<RemovePlan>,
+    pub removals: WorktreeRemovals,
     /// Pending bulk sweep state (shown in sweep modal)
     pub pending_sweep: Option<SweepState>,
     /// Pending project picker state (shown in project picker modal)
@@ -227,7 +230,8 @@ impl App {
             table_state: TableState::default(),
             selected_pane_id: None,
             current_worktree,
-            stale_threshold_secs: 60 * 60, // 60 minutes
+            stale_threshold_secs: config.stale_after_secs(),
+            sleeping_pane_ids: HashSet::new(),
             config,
             should_quit: false,
             should_jump: false,
@@ -273,6 +277,7 @@ impl App {
             worktree_filter_active: false,
             worktree_sort_mode: WorktreeSortMode::load(),
             pending_remove: None,
+            removals: WorktreeRemovals::default(),
             pending_sweep: None,
             pending_project_picker: None,
             pending_base_picker: None,
@@ -310,6 +315,8 @@ impl App {
     }
 
     pub fn refresh(&mut self) {
+        self.sleeping_pane_ids = load_sleeping_pane_ids(self.mux.as_ref());
+
         // Load agents from StateStore with reconciliation against live pane state
         self.all_agents = StateStore::new()
             .and_then(|store| store.load_reconciled_agents(self.mux.as_ref()))
@@ -429,4 +436,17 @@ impl App {
             }
         }
     }
+}
+
+fn load_sleeping_pane_ids(mux: &dyn Multiplexer) -> HashSet<String> {
+    if mux.name() != "tmux" {
+        return HashSet::new();
+    }
+
+    crate::multiplexer::TmuxBackend::for_socket(&mux.instance_id())
+        .global_option("@workmux_sleeping_panes")
+        .ok()
+        .flatten()
+        .map(|value| value.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default()
 }

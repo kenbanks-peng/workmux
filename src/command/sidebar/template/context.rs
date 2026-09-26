@@ -456,22 +456,14 @@ fn is_agent_stale(
     is_sleeping: bool,
     is_interrupted: bool,
 ) -> bool {
-    if is_sleeping {
-        return true;
-    }
-
-    if !is_interrupted
-        && matches!(
-            status,
-            Some(AgentStatus::Working) | Some(AgentStatus::Waiting)
-        )
-    {
-        return false;
-    }
-
-    activity_ts
-        .map(|ts| now_secs.saturating_sub(ts) > stale_threshold_secs)
-        .unwrap_or(true)
+    crate::agent_staleness::is_stale(
+        activity_ts,
+        status,
+        now_secs,
+        stale_threshold_secs,
+        is_sleeping,
+        is_interrupted,
+    )
 }
 
 fn should_dim_agent(dim_stale: bool, is_stale: bool) -> bool {

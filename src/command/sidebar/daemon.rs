@@ -120,6 +120,7 @@ fn snapshots_equal(
         expanded_groups: _,
         stale_pane_ids: _,
         collapse_stale: _,
+        stale_threshold_secs: _,
         agents: _,
         config_version: _,
     } = left;
@@ -139,6 +140,7 @@ fn snapshots_equal(
         && left.expanded_groups == right.expanded_groups
         && left.stale_pane_ids == right.stale_pane_ids
         && left.collapse_stale == right.collapse_stale
+        && left.stale_threshold_secs == right.stale_threshold_secs
         && left.agents == right.agents
         && left.config_version == right.config_version
 }
@@ -2213,7 +2215,7 @@ pub fn run() -> Result<()> {
 
         if publish_pending && let Some((agents, tmux_state)) = &cached_inputs {
             publish_pending = false;
-            let (position, layout_mode, sort, group_by, collapse_stale) = {
+            let (position, layout_mode, sort, group_by, collapse_stale, stale_threshold_secs) = {
                 let cfg = config.lock().unwrap();
                 (
                     read_sidebar_position(&cfg, tmux_state.position.as_deref()),
@@ -2222,6 +2224,7 @@ pub fn run() -> Result<()> {
                     cfg.sidebar.sort.unwrap_or_default(),
                     read_sidebar_group_by(&cfg, tmux_state.group_by.as_deref()),
                     cfg.sidebar.collapse_stale(),
+                    cfg.stale_after_secs(),
                 )
             };
             // Folding is part of the grouped presentation: a flat list shows
@@ -2245,6 +2248,7 @@ pub fn run() -> Result<()> {
                     sort,
                     group_by,
                     collapse_stale,
+                    stale_threshold_secs,
                     expanded_groups: read_expanded_groups(tmux_state.expanded_groups.as_deref()),
                     git_statuses: git_cache.lock().ok().map(|c| c.clone()).unwrap_or_default(),
                     pr_statuses: pr_cache.lock().ok().map(|c| c.clone()).unwrap_or_default(),
@@ -2268,7 +2272,7 @@ pub fn run() -> Result<()> {
             output.snapshot.config_version = config_version.load(Ordering::Relaxed);
             server.broadcast(&output.snapshot);
 
-            let stale_threshold = super::snapshot::STALE_THRESHOLD_SECS;
+            let stale_threshold = output.snapshot.stale_threshold_secs;
             let entries: Vec<GitWorkerPath> = output
                 .snapshot
                 .agents
@@ -2429,6 +2433,7 @@ struct TickInput {
     sort: crate::config::SidebarSort,
     group_by: Option<crate::config::SidebarGroupBy>,
     collapse_stale: bool,
+    stale_threshold_secs: u64,
     expanded_groups: Vec<String>,
     git_statuses: HashMap<PathBuf, GitStatus>,
     pr_statuses: HashMap<PathBuf, PrPathEntry>,
@@ -2477,6 +2482,7 @@ fn compute_tick(
         sort,
         group_by,
         collapse_stale,
+        stale_threshold_secs,
         expanded_groups,
         git_statuses,
         pr_statuses,
@@ -2519,6 +2525,7 @@ fn compute_tick(
         sort,
         group_by,
         collapse_stale,
+        stale_threshold_secs: Some(stale_threshold_secs),
         expanded_groups,
         status_icons: status_icons.clone(),
         git_statuses,
@@ -2875,6 +2882,7 @@ mod tests {
             expanded_groups: Vec::new(),
             stale_pane_ids: std::collections::HashSet::new(),
             collapse_stale: false,
+            stale_threshold_secs: super::super::snapshot::STALE_THRESHOLD_SECS,
             active_windows: HashSet::new(),
             active_pane_ids: HashSet::new(),
             window_pane_counts: HashMap::new(),
@@ -4250,6 +4258,7 @@ mod tests {
                     sort: crate::config::SidebarSort::default(),
                     group_by: None,
                     collapse_stale: false,
+                    stale_threshold_secs: crate::command::sidebar::snapshot::STALE_THRESHOLD_SECS,
                     expanded_groups: Vec::new(),
                     now,
                     now_ts,

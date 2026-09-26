@@ -47,7 +47,8 @@ impl App {
                     self.apply_worktree_filters();
                 }
             }
-            AppEvent::WorktreeList(worktrees) => {
+            AppEvent::WorktreeList(mut worktrees) => {
+                self.removals.filter_snapshot(&mut worktrees);
                 let needs_pr_fetch = self.all_worktrees.is_empty() && !worktrees.is_empty();
                 self.all_worktrees = worktrees;
                 self.apply_worktree_filters();
@@ -62,6 +63,9 @@ impl App {
                 if self.worktree_preview_path.as_ref() == Some(&path) {
                     self.worktree_preview = Some(log);
                 }
+            }
+            AppEvent::RemoveWorktreeResult(path, result) => {
+                self.handle_remove_worktree_result(path, result);
             }
             AppEvent::AddWorktreeResult(result) => {
                 self.handle_add_worktree_result(result);

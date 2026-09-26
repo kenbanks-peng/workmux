@@ -504,7 +504,7 @@ impl SidebarApp {
             detected_theme_mode,
             status_icons,
             spinner_frame: 0,
-            stale_threshold_secs: super::snapshot::STALE_THRESHOLD_SECS,
+            stale_threshold_secs: config.stale_after_secs(),
             dim_stale: config.sidebar.dim_stale(),
             // Folding arrives with the first snapshot, from the daemon.
             collapse_stale: false,
@@ -597,6 +597,7 @@ impl SidebarApp {
         let previous_agent_idx = self.selected_agent_idx();
 
         self.group_by = snapshot.group_by;
+        self.stale_threshold_secs = snapshot.stale_threshold_secs;
         self.refresh_templates();
         self.collapse_stale = snapshot.collapse_stale;
         self.expanded_groups = snapshot.expanded_groups.into_iter().collect();
@@ -2187,6 +2188,7 @@ mod tests {
             expanded_groups: Vec::new(),
             stale_pane_ids: std::collections::HashSet::new(),
             collapse_stale: false,
+            stale_threshold_secs: crate::command::sidebar::snapshot::STALE_THRESHOLD_SECS,
             active_windows: std::collections::HashSet::from([(
                 "s".to_string(),
                 "@host".to_string(),
@@ -2393,6 +2395,7 @@ mod grouping_tests {
         SidebarSnapshot {
             stale_pane_ids,
             collapse_stale: false,
+            stale_threshold_secs: super::super::snapshot::STALE_THRESHOLD_SECS,
             position: SidebarPosition::Left,
             layout_mode: SidebarLayoutMode::Tiles,
             filter_mode: SidebarFilterMode::None,

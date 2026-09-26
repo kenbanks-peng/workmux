@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::env;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::debug;
@@ -22,6 +23,92 @@ const CLEANUP_NODE_MODULES_PLACEHOLDER: &str = "<cleanup-node-modules>";
 
 /// Names of lockfiles that mark a directory as a Node.js package.
 const NODE_LOCKFILES: [&str; 3] = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock"];
+
+/// Default inactivity period before an agent is considered stale.
+pub const DEFAULT_STALE_AFTER_SECS: u64 = 60 * 60;
+
+fn parse_stale_after(value: &str) -> Result<u64, String> {
+    let value = value.trim();
+    let digit_count = value.bytes().take_while(u8::is_ascii_digit).count();
+    if digit_count == 0 {
+        return Err("expected seconds or a duration such as 90m or 5h".to_string());
+    }
+
+    let amount = value[..digit_count]
+        .parse::<u64>()
+        .map_err(|_| "duration is too large".to_string())?;
+    let multiplier = match value[digit_count..].trim().to_ascii_lowercase().as_str() {
+        "" | "s" => 1,
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 24 * 60 * 60,
+        _ => return Err("duration unit must be s, m, h, or d".to_string()),
+    };
+    amount
+        .checked_mul(multiplier)
+        .ok_or_else(|| "duration is too large".to_string())
+}
+
+fn deserialize_stale_after<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StaleAfterVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StaleAfterVisitor {
+        type Value = Option<u64>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("seconds as an integer or a duration such as 90m or 5h")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(value))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            u64::try_from(value)
+                .map(Some)
+                .map_err(|_| E::custom("stale_after cannot be negative"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            parse_stale_after(value).map(Some).map_err(E::custom)
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(StaleAfterVisitor)
+}
 
 /// Whether `root` or any of its immediate subdirectories contains a Node.js
 /// lockfile.
@@ -755,6 +842,15 @@ pub struct Config {
     /// Whether to use nerdfont icons (None = prompt user on first run)
     #[serde(default)]
     pub nerdfont: Option<bool>,
+
+    /// Inactivity period before an agent is considered stale, in seconds.
+    /// Accepts integer seconds or a duration string such as `90m` or `5h`.
+    #[serde(
+        default,
+        rename = "stale_after",
+        deserialize_with = "deserialize_stale_after"
+    )]
+    pub stale_after_secs: Option<u64>,
 
     /// Color theme for the dashboard
     #[serde(default)]
@@ -2830,6 +2926,7 @@ impl Config {
             nerdfont,
             auto_update_check,
             prompt_file_only,
+            stale_after_secs,
         );
 
         // Layouts: merge maps by key so project layouts extend global ones
@@ -3190,6 +3287,11 @@ impl Config {
         Self::default_panes_with_primary(Some("<agent>"))
     }
 
+    /// Resolve the stale-agent timeout, defaulting to one hour.
+    pub fn stale_after_secs(&self) -> u64 {
+        self.stale_after_secs.unwrap_or(DEFAULT_STALE_AFTER_SECS)
+    }
+
     /// Get the window prefix to use.
     /// Priority: explicit window_prefix config > nerdfont icon > "wm-"
     pub fn window_prefix(&self) -> &str {
@@ -3458,6 +3560,10 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # Dashboard
 #-------------------------------------------------------------------------------
 
+# Inactivity period before agents count as stale in the dashboard and sidebar.
+# Defaults to one hour. Accepts integer seconds or a duration such as 90m or 5h.
+# stale_after: 5h
+
 # Actions for dashboard keybindings (c = commit, m = merge).
 # Values are sent to the agent's pane. Use ! prefix for shell commands.
 # Preview size (10-90): larger = more preview, less table. Use +/- keys to adjust.
@@ -3504,7 +3610,7 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #   # in left sidebars.
 #   group_by: project
 #
-#   # Dim agents whose sidebar activity state is older than one hour. Default: true.
+#   # Dim agents classified as stale using `stale_after`. Default: true.
 #   dim_stale: true
 #
 #   # While grouped, fold each group's stale agents behind a toggle and move
@@ -4599,6 +4705,43 @@ sidebar:
             let off: Config = serde_yaml::from_str(raw).unwrap();
             assert_eq!(off.sidebar.group_by(), None);
         }
+    }
+
+    #[test]
+    fn stale_after_accepts_seconds_and_duration_strings() {
+        assert_eq!(Config::default().stale_after_secs(), 60 * 60);
+        for (raw, expected) in [
+            ("stale_after: 900", 900),
+            ("stale_after: 90s", 90),
+            ("stale_after: 90m", 90 * 60),
+            ("stale_after: 5h", 5 * 60 * 60),
+            ("stale_after: 2d", 2 * 24 * 60 * 60),
+        ] {
+            let config: Config = serde_yaml::from_str(raw).unwrap();
+            assert_eq!(config.stale_after_secs(), expected, "{raw}");
+        }
+    }
+
+    #[test]
+    fn stale_after_rejects_negative_invalid_and_overflow_values() {
+        for raw in [
+            "stale_after: -1",
+            "stale_after: 1w",
+            "stale_after: 18446744073709551615h",
+        ] {
+            assert!(serde_yaml::from_str::<Config>(raw).is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn stale_after_project_value_overrides_global_value() {
+        let global: Config = serde_yaml::from_str("stale_after: 5h\n").unwrap();
+        let project: Config = serde_yaml::from_str("stale_after: 90m\n").unwrap();
+        assert_eq!(global.merge(project).stale_after_secs(), 90 * 60);
+
+        let global: Config = serde_yaml::from_str("stale_after: 5h\n").unwrap();
+        let project: Config = serde_yaml::from_str("{}\n").unwrap();
+        assert_eq!(global.merge(project).stale_after_secs(), 5 * 60 * 60);
     }
 
     #[test]
