@@ -1,6 +1,6 @@
-[tasks."sandbox:build"]
+[tasks."sandbox"]
 description = "Build the local Pi sandbox image with Apple Container"
-run = "container build -t workmux-sandbox-pi-local:latest -f Dockerfile.sandbox ."
+run = "container build -t workmux-sandbox-dev:latest -f Dockerfile.sandbox ."
 
 [tasks.build]
 description = "Build workmux for production"
