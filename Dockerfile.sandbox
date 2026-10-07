@@ -1,3 +1,0 @@
-# Derivative Pi sandbox; no additional tooling yet.
-# Build: container build -t workmux-sandbox-dev:latest -f Dockerfile.sandbox .
-FROM ghcr.io/raine/workmux-sandbox:pi
