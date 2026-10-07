@@ -186,7 +186,7 @@ curl -o "$grok_home/hooks/workmux-status.json" \
 
 ## Antigravity CLI (`agy`) setup
 
-`workmux setup` installs Antigravity lifecycle hooks in `~/.gemini/config/hooks.json`. The first `PreInvocation` handler registers the pane when agent execution begins, subsequent invocation and tool handlers mark it working, and the terminal `Stop` event marks it done.
+`workmux setup` installs Antigravity lifecycle hooks in `~/.gemini/config/hooks.json`. The first `PreInvocation` handler registers the pane when agent execution begins, the second marks it working, and the terminal `Stop` event marks it done.
 
 Antigravity loads hook configuration when a session starts, so restart existing `agy` sessions after setup.
 
@@ -203,17 +203,6 @@ For manual setup, merge this named hook group into `~/.gemini/config/hooks.json`
       {
         "type": "command",
         "command": "workmux set-window-status working >/dev/null 2>&1 || true; printf '{}\\n'"
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "workmux set-window-status working >/dev/null 2>&1 || true; printf '{}\\n'"
-          }
-        ]
       }
     ],
     "Stop": [

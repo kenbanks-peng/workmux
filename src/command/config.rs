@@ -88,6 +88,7 @@ const DEFAULT_GLOBAL_CONFIG: &str = r#"# workmux global configuration
 # agent: claude
 # merge_strategy: rebase
 # merge_keep: true
+# confirm_unmerged_removal: false
 #
 # panes:
 #   - command: <agent>

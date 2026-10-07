@@ -270,16 +270,21 @@ impl App {
         // Merge PR data from dashboard's own PR fetching into worktrees
         // (workflow::list is called with fetch_pr_status=false to avoid spinner)
         if !self.pr_statuses.is_empty() {
+            let all_worktrees = &self.all_worktrees;
+            let pr_statuses = &self.pr_statuses;
             for wt in &mut self.worktrees {
                 if wt.pr_info.is_some() || wt.is_main {
                     continue;
                 }
-                // Search all repo roots for a matching branch
-                for prs in self.pr_statuses.values() {
-                    if let Some(pr) = prs.get(&wt.branch) {
-                        wt.pr_info = Some(pr.clone());
-                        break;
-                    }
+                let Some(repo_root) = super::agents::repo_root_for_worktree(all_worktrees, wt)
+                else {
+                    continue;
+                };
+                if let Some(pr) = pr_statuses
+                    .get(repo_root)
+                    .and_then(|prs| prs.get(&wt.branch))
+                {
+                    wt.pr_info = Some(pr.clone());
                 }
             }
         }

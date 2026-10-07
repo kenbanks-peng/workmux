@@ -240,7 +240,7 @@ pub struct DashboardConfig {
 
 /// A configurable column of the dashboard agents table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum AgentColumn {
     /// Jump key of the row, shown under the `#` header.
     Number,
@@ -253,6 +253,10 @@ pub enum AgentColumn {
     /// Pull request and check status. Rendered only while at least one agent
     /// has GitHub status to show.
     Pr,
+    /// Pull request title.
+    PrTitle,
+    /// Issues GitHub reports as closed by the pull request.
+    PrIssues,
     /// Multiplexer window index, as shown in the tmux status bar.
     Window,
     /// Agent status (icons).
@@ -261,6 +265,8 @@ pub enum AgentColumn {
     Time,
     /// Agent pane title.
     Title,
+    /// Latest prompt the user sent to the agent.
+    Prompt,
 }
 
 /// Columns used when the config does not set `dashboard.agent_columns`.
@@ -277,13 +283,15 @@ pub const DEFAULT_AGENT_COLUMNS: [AgentColumn; 8] = [
 
 /// A configurable column of the dashboard worktree table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum WorktreeColumn {
     Number,
     Project,
     Worktree,
     Git,
     Pr,
+    PrTitle,
+    PrIssues,
     Mux,
     Age,
     Agent,
@@ -452,6 +460,17 @@ impl HorizontalSidebarConfig {
     }
 }
 
+/// Action performed by Enter on a sidebar agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarEnterAction {
+    /// Switch to and focus the agent pane.
+    #[default]
+    Focus,
+    /// Show the agent's window while keeping focus in its sidebar.
+    Select,
+}
+
 /// Configuration for the sidebar.
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct SidebarConfig {
@@ -471,12 +490,20 @@ pub struct SidebarConfig {
     /// Layout mode: "compact" or "tiles". Default: "tiles"
     pub layout: Option<String>,
 
+    /// Action performed by Enter on an agent: "focus" or "select".
+    /// Default: "focus".
+    pub enter_action: Option<SidebarEnterAction>,
+
     /// Horizontal bar configuration.
     #[serde(default)]
     pub horizontal: HorizontalSidebarConfig,
 
     /// Custom templates for sidebar rendering.
     pub templates: Option<TemplatesConfig>,
+
+    /// Collect Git status and GitHub pull request/check data for the sidebar.
+    /// This daemon-wide setting is read only from global config. Default: true.
+    pub git_status: Option<bool>,
 
     /// Per-agent icon overrides.
     pub agent_icons: Option<AgentIcons>,
@@ -499,6 +526,14 @@ pub struct SidebarConfig {
 }
 
 impl SidebarConfig {
+    pub fn enter_action(&self) -> SidebarEnterAction {
+        self.enter_action.unwrap_or_default()
+    }
+
+    pub fn git_status(&self) -> bool {
+        self.git_status.unwrap_or(true)
+    }
+
     pub fn dim_stale(&self) -> bool {
         self.dim_stale.unwrap_or(true)
     }
@@ -805,6 +840,11 @@ pub struct Config {
     /// Keep worktree, window, and branch by default after `workmux merge`
     #[serde(default)]
     pub merge_keep: Option<bool>,
+
+    /// Confirm before deleting branches with commits not merged into their base.
+    /// Default: true.
+    #[serde(default)]
+    pub confirm_unmerged_removal: Option<bool>,
 
     /// Strategy for deriving worktree/window names from branch names
     #[serde(default)]
@@ -2617,6 +2657,19 @@ fn merge_grouped_templates(
 }
 
 impl Config {
+    /// Whether status hooks store the latest user prompt. Prompts are kept
+    /// only while the dashboard or sidebar is configured to show them.
+    pub fn prompt_capture_enabled(&self) -> bool {
+        self.dashboard
+            .agent_columns()
+            .contains(&AgentColumn::Prompt)
+            || self
+                .sidebar
+                .templates
+                .as_ref()
+                .is_some_and(crate::command::sidebar::templates_use_prompt)
+    }
+
     /// Load and merge global and project configurations.
     pub fn load(cli_agent: Option<&str>) -> anyhow::Result<Self> {
         Self::load_with_override(cli_agent, None)
@@ -2919,6 +2972,7 @@ impl Config {
             agent,
             merge_strategy,
             merge_keep,
+            confirm_unmerged_removal,
             worktree_prefix,
             panes,
             windows,
@@ -3062,6 +3116,7 @@ impl Config {
             width: project.sidebar.width.or(self.sidebar.width),
             height: project.sidebar.height.or(self.sidebar.height),
             layout: project.sidebar.layout.or(self.sidebar.layout),
+            enter_action: project.sidebar.enter_action.or(self.sidebar.enter_action),
             horizontal: HorizontalSidebarConfig {
                 item_width: project
                     .sidebar
@@ -3073,6 +3128,7 @@ impl Config {
                 self.sidebar.templates.as_ref(),
                 project.sidebar.templates.as_ref(),
             ),
+            git_status: self.sidebar.git_status,
             agent_icons: match (
                 self.sidebar.agent_icons.clone(),
                 project.sidebar.agent_icons.clone(),
@@ -3395,6 +3451,11 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # Keep and cleanup CLI flags always override this.
 # merge_keep: true
 
+# Confirm before deleting a branch with commits not merged into its base.
+# Set to false to remove unmerged branches while still protecting uncommitted changes.
+# Default: true.
+# confirm_unmerged_removal: false
+
 #-------------------------------------------------------------------------------
 # Naming & Paths
 #-------------------------------------------------------------------------------
@@ -3602,6 +3663,10 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #   # Default: "tiles". Can be toggled at runtime with 'v' key.
 #   layout: tiles
 #
+#   # Enter action: "focus" (default) focuses the agent pane; "select" shows
+#   # its window while keeping focus in the sidebar. Press 'o' to focus the pane.
+#   enter_action: focus
+#
 #   # Row ordering: "recency" (default), "priority" or "window".
 #   sort: recency
 #
@@ -3772,9 +3837,10 @@ mod tests {
         AllowedDomainEntry, CLEANUP_NODE_MODULES_PLACEHOLDER, Config, ContainerConfig,
         ContainerDevice, DEFAULT_AGENT_COLUMNS, DEFAULT_WORKTREE_COLUMNS, ExtraMount, FileConfig,
         LayoutConfig, LimaConfig, NODE_MODULES_CLEANUP_SCRIPT, NetworkConfig, NetworkPolicy,
-        PaneConfig, SandboxConfig, SandboxRuntime, SandboxTarget, SidebarHeight, SidebarPosition,
-        SidebarWidth, SplitDirection, ToolchainMode, WindowPlacement, WorktreeColumn,
-        is_agent_command, validate_domain, validate_group_add_entry, validate_layouts_config,
+        PaneConfig, SandboxConfig, SandboxRuntime, SandboxTarget, SidebarEnterAction,
+        SidebarHeight, SidebarPosition, SidebarWidth, SplitDirection, ToolchainMode,
+        WindowPlacement, WorktreeColumn, is_agent_command, validate_domain,
+        validate_group_add_entry, validate_layouts_config,
     };
     use crate::test_support;
     use tempfile::TempDir;
@@ -3876,13 +3942,15 @@ mod tests {
     #[test]
     fn agent_columns_follow_configured_order() {
         let config: Config = serde_yaml::from_str(
-            "dashboard:\n  agent_columns: [title, status, number, worktree, git, pr, window, project, time]\n",
+            "dashboard:\n  agent_columns: [title, pr_title, pr_issues, status, number, worktree, git, pr, window, project, time]\n",
         )
         .expect("config parses");
         assert_eq!(
             config.dashboard.agent_columns(),
             vec![
                 AgentColumn::Title,
+                AgentColumn::PrTitle,
+                AgentColumn::PrIssues,
                 AgentColumn::Status,
                 AgentColumn::Number,
                 AgentColumn::Worktree,
@@ -3927,6 +3995,43 @@ mod tests {
     }
 
     #[test]
+    fn prompt_capture_follows_prompt_display() {
+        let enabled = |yaml: &str| {
+            serde_yaml::from_str::<Config>(yaml)
+                .expect("config parses")
+                .prompt_capture_enabled()
+        };
+
+        assert!(!Config::default().prompt_capture_enabled());
+        assert!(enabled("dashboard:\n  agent_columns: [title, prompt]\n"));
+        assert!(!enabled("dashboard:\n  agent_columns: [title]\n"));
+        assert!(enabled(
+            "sidebar:\n  templates:\n    compact: '{primary} {prompt}'\n"
+        ));
+        assert!(enabled(
+            "sidebar:\n  templates:\n    horizontal: ['{primary}', '{prompt}']\n"
+        ));
+        assert!(enabled(
+            "sidebar:\n  templates:\n    grouped:\n      tiles: ['{primary}', '{prompt}']\n"
+        ));
+        assert!(enabled(
+            "sidebar:\n  templates:\n    grouped:\n      compact: '{prompt}'\n"
+        ));
+        // Escaped braces render literal text.
+        assert!(!enabled(
+            "sidebar:\n  templates:\n    compact: '{{prompt}}'\n"
+        ));
+        // Group headers cannot render agent tokens.
+        assert!(!enabled(
+            "sidebar:\n  templates:\n    grouped:\n      header: '{group} {prompt}'\n"
+        ));
+        // An invalid line makes the sidebar fall back to the default tiles.
+        assert!(!enabled(
+            "sidebar:\n  templates:\n    tiles: ['{prompt}', '{unclosed']\n"
+        ));
+    }
+
+    #[test]
     fn agent_columns_inherit_global_when_project_unset() {
         let global: Config = serde_yaml::from_str("dashboard:\n  agent_columns: [status, title]\n")
             .expect("config parses");
@@ -3957,13 +4062,15 @@ mod tests {
     #[test]
     fn worktree_columns_follow_configured_order() {
         let config: Config = serde_yaml::from_str(
-            "dashboard:\n  worktree_columns: [agent, mux, number, worktree, git, pr, project, age]\n",
+            "dashboard:\n  worktree_columns: [agent, pr_title, pr_issues, mux, number, worktree, git, pr, project, age]\n",
         )
         .expect("config parses");
         assert_eq!(
             config.dashboard.worktree_columns(),
             vec![
                 WorktreeColumn::Agent,
+                WorktreeColumn::PrTitle,
+                WorktreeColumn::PrIssues,
                 WorktreeColumn::Mux,
                 WorktreeColumn::Number,
                 WorktreeColumn::Worktree,
@@ -4274,6 +4381,15 @@ mod tests {
         assert_eq!(disabled.merge_keep, Some(false));
     }
 
+    #[test]
+    fn confirm_unmerged_removal_parses_boolean_values() {
+        let enabled: Config = serde_yaml::from_str("confirm_unmerged_removal: true").unwrap();
+        assert_eq!(enabled.confirm_unmerged_removal, Some(true));
+
+        let disabled: Config = serde_yaml::from_str("confirm_unmerged_removal: false").unwrap();
+        assert_eq!(disabled.confirm_unmerged_removal, Some(false));
+    }
+
     fn pre_remove_default_for_root(root: &std::path::Path) -> Option<Vec<String>> {
         Config::merge_and_apply_defaults(Config::default(), Config::default(), None, root)
             .unwrap()
@@ -4541,6 +4657,21 @@ mod tests {
     }
 
     #[test]
+    fn confirm_unmerged_removal_project_overrides_global() {
+        let global = Config {
+            confirm_unmerged_removal: Some(true),
+            ..Default::default()
+        };
+        let project = Config {
+            confirm_unmerged_removal: Some(false),
+            ..Default::default()
+        };
+
+        let merged = global.merge(project);
+        assert_eq!(merged.confirm_unmerged_removal, Some(false));
+    }
+
+    #[test]
     fn agent_icon_config_parses_legacy_string() {
         let v: AgentIconConfig = serde_yaml::from_str("\"C\"").unwrap();
         assert_eq!(v, AgentIconConfig::Plain("C".to_string()));
@@ -4644,6 +4775,33 @@ sidebar:
     }
 
     #[test]
+    fn sidebar_enter_action_defaults_parses_and_merges() {
+        assert_eq!(
+            Config::default().sidebar.enter_action(),
+            SidebarEnterAction::Focus
+        );
+
+        let global: Config = serde_yaml::from_str("sidebar:\n  enter_action: select\n").unwrap();
+        assert_eq!(global.sidebar.enter_action(), SidebarEnterAction::Select);
+        assert_eq!(
+            global
+                .clone()
+                .merge(Config::default())
+                .sidebar
+                .enter_action(),
+            SidebarEnterAction::Select
+        );
+
+        let project: Config = serde_yaml::from_str("sidebar:\n  enter_action: focus\n").unwrap();
+        assert_eq!(
+            global.merge(project).sidebar.enter_action(),
+            SidebarEnterAction::Focus
+        );
+
+        assert!(serde_yaml::from_str::<Config>("sidebar:\n  enter_action: preview\n").is_err());
+    }
+
+    #[test]
     fn sidebar_position_and_height_merge_per_field() {
         let global: Config = serde_yaml::from_str(
             r#"
@@ -4742,6 +4900,31 @@ sidebar:
         let global: Config = serde_yaml::from_str("stale_after: 5h\n").unwrap();
         let project: Config = serde_yaml::from_str("{}\n").unwrap();
         assert_eq!(global.merge(project).stale_after_secs(), 5 * 60 * 60);
+    }
+
+    #[test]
+    fn sidebar_git_status_defaults_true_and_ignores_project_override() {
+        let default_config = Config::default();
+        assert!(default_config.sidebar.git_status());
+
+        let global: Config = serde_yaml::from_str(
+            r#"
+sidebar:
+  git_status: false
+"#,
+        )
+        .unwrap();
+        let project: Config = serde_yaml::from_str(
+            r#"
+sidebar:
+  git_status: true
+"#,
+        )
+        .unwrap();
+        let merged = global.merge(project);
+
+        assert_eq!(merged.sidebar.git_status, Some(false));
+        assert!(!merged.sidebar.git_status());
     }
 
     #[test]

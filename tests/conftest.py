@@ -1358,6 +1358,7 @@ def write_workmux_config(
     agent: Optional[str] = None,
     merge_strategy: Optional[str] = None,
     merge_keep: Optional[bool] = None,
+    confirm_unmerged_removal: Optional[bool] = None,
     worktree_naming: Optional[str] = None,
     worktree_prefix: Optional[str] = None,
     main_branch: Optional[str] = None,
@@ -1392,6 +1393,8 @@ def write_workmux_config(
         config["merge_strategy"] = merge_strategy
     if merge_keep is not None:
         config["merge_keep"] = merge_keep
+    if confirm_unmerged_removal is not None:
+        config["confirm_unmerged_removal"] = confirm_unmerged_removal
     if worktree_naming:
         config["worktree_naming"] = worktree_naming
     if worktree_prefix:

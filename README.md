@@ -232,6 +232,7 @@ include global values alongside project-specific ones. Other settings like
 nerdfont: true # Enable nerdfont icons (prompted on first run)
 merge_strategy: rebase # Make workmux merge do rebase by default
 merge_keep: true # Keep worktree, window, and branch after merge by default
+confirm_unmerged_removal: false # Remove unmerged branches without confirmation
 agent: claude
 
 panes:
@@ -284,9 +285,10 @@ customize.
 | `window_placement` | New tmux window placement (`after_current` or `rightmost`)                                            | `after_current`             |
 | `agent`            | Default agent for `<agent>` placeholder                                                               | `claude`                    |
 | `agents`         | Named agent commands ([docs](https://workmux.raine.dev/guide/agents#named-agents), global-only)       | `{}`                        |
-| `merge_strategy` | Default merge strategy (`merge`, `rebase`, `squash`)                                                  | `merge`                     |
-| `merge_keep`     | Keep resources after `workmux merge` by default                                                       | `false`                     |
-| `theme`          | Dashboard color scheme ([custom colors](https://workmux.raine.dev/guide/configuration#custom-colors)) | `default` (auto dark/light) |
+| `merge_strategy`           | Default merge strategy (`merge`, `rebase`, `squash`)                                                  | `merge`                     |
+| `merge_keep`               | Keep resources after `workmux merge` by default                                                       | `false`                     |
+| `confirm_unmerged_removal` | Confirm before deleting branches with commits not merged into their base                               | `true`                      |
+| `theme`                    | Dashboard color scheme ([custom colors](https://workmux.raine.dev/guide/configuration#custom-colors)) | `default` (auto dark/light) |
 
 Set `base_branch: auto` to create independent work streams from each repository's
 effective main branch. Workmux uses configured `main_branch`, then the local
@@ -1334,6 +1336,10 @@ Supports removing multiple worktrees in a single command.
 - `--keep-branch`, `-k`: Remove only the worktree and tmux window while keeping
   the local branch
 
+Set `confirm_unmerged_removal: false` to remove branches with unmerged commits
+without an extra confirmation. Worktrees with uncommitted changes remain
+protected and still require `--force`.
+
 #### Examples
 
 ```bash
@@ -1906,7 +1912,8 @@ The sidebar displays:
 | Key     | Action                 |
 | ------- | ---------------------- |
 | `j`/`k` | Navigate up/down       |
-| `Enter` | Jump to agent          |
+| `Enter` | Run configured action  |
+| `o`     | Focus the agent pane   |
 | `g`/`G` | Jump to first/last     |
 | `v`     | Toggle layout mode     |
 | `f`     | Toggle session filter  |
@@ -1926,7 +1933,11 @@ sidebar:
   position: left # "left" (default) or "top"
   width: 40 # left width in columns, or "15%" for percentage
   layout: tiles # left only: "compact" or "tiles" (default)
+  enter_action: focus # "focus" (default) or "select"
 ```
+
+Set `enter_action: select` to show an agent's window while keeping focus in its
+sidebar. Press `o` to focus the selected agent pane.
 
 The left sidebar defaults to 10% of terminal width, clamped between 25 and 50
 columns. Widths above 80 columns use the default width so tmux pane expansion

@@ -133,13 +133,6 @@ fn workmux_hooks() -> Value {
                 "type": "command",
                 "command": WORKING_COMMAND
             }],
-            "PreToolUse": [{
-                "matcher": ".*",
-                "hooks": [{
-                    "type": "command",
-                    "command": WORKING_COMMAND
-                }]
-            }],
             "Stop": [{
                 "type": "command",
                 "command": STOP_COMMAND
@@ -155,7 +148,7 @@ fn has_workmux_hooks(config: &Value) -> bool {
 
     plain_event_has_command(group, "PreInvocation", REGISTER_COMMAND)
         && plain_event_has_command(group, "PreInvocation", WORKING_COMMAND)
-        && matcher_event_has_command(group, "PreToolUse", WORKING_COMMAND)
+        && group.get("PreToolUse").is_none()
         && plain_event_has_command(group, "Stop", STOP_COMMAND)
 }
 
@@ -167,25 +160,6 @@ fn plain_event_has_command(group: &Value, event: &str, command: &str) -> bool {
             entries.iter().any(|entry| {
                 entry.get("command").and_then(Value::as_str) == Some(command)
                     && entry.get("type").and_then(Value::as_str) == Some("command")
-            })
-        })
-}
-
-fn matcher_event_has_command(group: &Value, event: &str, command: &str) -> bool {
-    group
-        .get(event)
-        .and_then(Value::as_array)
-        .is_some_and(|entries| {
-            entries.iter().any(|entry| {
-                entry
-                    .get("hooks")
-                    .and_then(Value::as_array)
-                    .is_some_and(|hooks| {
-                        hooks.iter().any(|hook| {
-                            hook.get("command").and_then(Value::as_str) == Some(command)
-                                && hook.get("type").and_then(Value::as_str) == Some("command")
-                        })
-                    })
             })
         })
 }
@@ -285,35 +259,23 @@ mod tests {
         );
         assert!(group["PreInvocation"][0].get("hooks").is_none());
         assert_eq!(
-            group["PreToolUse"][0]["hooks"][0]["command"],
-            Value::String(WORKING_COMMAND.to_string())
-        );
-        assert_eq!(
             group["Stop"][0]["command"],
             Value::String(STOP_COMMAND.to_string())
         );
+        assert!(group.get("PreToolUse").is_none());
         assert!(group.get("PostToolUse").is_none());
         assert!(group.get("PostInvocation").is_none());
         assert!(has_workmux_hooks(&hooks));
     }
 
     #[test]
-    fn hook_schema_uses_only_supported_events() {
+    fn hook_schema_uses_only_lifecycle_events() {
         let hooks = workmux_hooks();
         let group = hooks[WORKMUX_GROUP].as_object().unwrap();
-        let supported = [
-            "PreToolUse",
-            "PostToolUse",
-            "PreInvocation",
-            "PostInvocation",
-            "Stop",
-        ];
 
-        assert!(
-            group
-                .keys()
-                .all(|event| supported.contains(&event.as_str()))
-        );
+        assert_eq!(group.len(), 2);
+        assert!(group.contains_key("PreInvocation"));
+        assert!(group.contains_key("Stop"));
     }
 
     #[test]
@@ -353,13 +315,6 @@ mod tests {
                         "type": "command",
                         "command": WORKING_COMMAND
                     }],
-                    "PreToolUse": [{
-                        "matcher": ".*",
-                        "hooks": [{
-                            "type": "command",
-                            "command": WORKING_COMMAND
-                        }]
-                    }],
                     "Stop": [{
                         "type": "command",
                         "command": STOP_COMMAND
@@ -373,6 +328,32 @@ mod tests {
             check_at(&path).unwrap(),
             StatusCheck::UpdateAvailable
         ));
+    }
+
+    #[test]
+    fn legacy_pre_tool_hook_needs_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("hooks.json");
+        let mut legacy = workmux_hooks();
+        legacy[WORKMUX_GROUP]["PreToolUse"] = json!([{
+            "matcher": ".*",
+            "hooks": [{
+                "type": "command",
+                "command": WORKING_COMMAND
+            }]
+        }]);
+        write_json(&path, &legacy).unwrap();
+
+        assert!(matches!(
+            check_at(&path).unwrap(),
+            StatusCheck::UpdateAvailable
+        ));
+
+        install_at(&path).unwrap();
+
+        let config = read_json(&path).unwrap();
+        assert!(config[WORKMUX_GROUP].get("PreToolUse").is_none());
+        assert!(matches!(check_at(&path).unwrap(), StatusCheck::Installed));
     }
 
     #[test]

@@ -155,6 +155,24 @@ def test_remove_unmerged_branch_with_confirmation(
     assert branch_name not in branch_list_result.stdout
 
 
+def test_remove_unmerged_branch_without_confirmation_when_configured(
+    mux_server: MuxEnvironment, workmux_exe_path: Path, mux_repo_path: Path
+):
+    env = mux_server
+    branch_name = "configured-unmerged-removal"
+    write_workmux_config(mux_repo_path, confirm_unmerged_removal=False)
+    run_workmux_add(env, workmux_exe_path, mux_repo_path, branch_name)
+
+    worktree_path = get_worktree_path(mux_repo_path, branch_name)
+    create_commit(env, worktree_path, "feat: reviewed change")
+
+    run_workmux_remove(env, workmux_exe_path, mux_repo_path, branch_name)
+
+    assert not worktree_path.exists(), "Unmerged worktree should be removed"
+    branch_list_result = env.run_command(["git", "branch", "--list", branch_name])
+    assert branch_name not in branch_list_result.stdout
+
+
 def test_remove_unmerged_branch_aborted(
     mux_server: MuxEnvironment, workmux_exe_path: Path, mux_repo_path: Path
 ):
@@ -202,6 +220,29 @@ def test_remove_fails_on_uncommitted_changes(
     )
 
     assert worktree_path.exists(), "Worktree should not be removed when command fails"
+
+
+def test_configured_unmerged_removal_still_rejects_uncommitted_changes(
+    mux_server: MuxEnvironment, workmux_exe_path: Path, mux_repo_path: Path
+):
+    env = mux_server
+    branch_name = "configured-dirty-removal"
+    write_workmux_config(mux_repo_path, confirm_unmerged_removal=False)
+    run_workmux_add(env, workmux_exe_path, mux_repo_path, branch_name)
+
+    worktree_path = get_worktree_path(mux_repo_path, branch_name)
+    create_commit(env, worktree_path, "feat: reviewed change")
+    create_dirty_file(worktree_path)
+
+    run_workmux_remove(
+        env,
+        workmux_exe_path,
+        mux_repo_path,
+        branch_name,
+        expect_fail=True,
+    )
+
+    assert worktree_path.exists(), "Dirty worktree should not be removed"
 
 
 def test_remove_with_force_on_unmerged_branch(
@@ -771,6 +812,34 @@ def test_remove_all_skips_unmerged_without_force(
         ["git", "branch", "--list", unmerged_branch], cwd=mux_repo_path
     )
     assert unmerged_branch in result.stdout, "Unmerged branch should still exist"
+
+
+def test_remove_all_includes_unmerged_when_confirmation_disabled(
+    mux_server: MuxEnvironment, workmux_exe_path: Path, mux_repo_path: Path
+):
+    env = mux_server
+    write_workmux_config(mux_repo_path, confirm_unmerged_removal=False)
+
+    unmerged_branch = "all-configured-unmerged"
+    dirty_branch = "all-configured-dirty"
+    run_workmux_add(env, workmux_exe_path, mux_repo_path, unmerged_branch)
+    run_workmux_add(env, workmux_exe_path, mux_repo_path, dirty_branch)
+
+    unmerged_worktree = get_worktree_path(mux_repo_path, unmerged_branch)
+    dirty_worktree = get_worktree_path(mux_repo_path, dirty_branch)
+    create_commit(env, unmerged_worktree, "feat: reviewed change")
+    create_dirty_file(dirty_worktree)
+
+    run_workmux_remove(
+        env,
+        workmux_exe_path,
+        mux_repo_path,
+        all=True,
+        user_input="y",
+    )
+
+    assert not unmerged_worktree.exists(), "Unmerged worktree should be removed"
+    assert dirty_worktree.exists(), "Dirty worktree should be skipped"
 
 
 def test_remove_all_with_keep_branch(

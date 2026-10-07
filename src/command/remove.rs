@@ -12,19 +12,28 @@ pub fn run(
     force: bool,
     keep_branch: bool,
 ) -> Result<()> {
+    let config = config::Config::load(None)?;
+    let confirm_unmerged = config.confirm_unmerged_removal.unwrap_or(true);
+
     if all {
-        return run_all(force, keep_branch);
+        return run_all(force, keep_branch, confirm_unmerged);
     }
 
     if gone {
-        return run_gone(force, keep_branch);
+        return run_gone(force, keep_branch, confirm_unmerged);
     }
 
-    run_specified(names, force, keep_branch)
+    run_specified(names, force, keep_branch, confirm_unmerged, config)
 }
 
 /// Remove specific worktrees provided by user (or current if empty)
-fn run_specified(names: Vec<String>, force: bool, keep_branch: bool) -> Result<()> {
+fn run_specified(
+    names: Vec<String>,
+    force: bool,
+    keep_branch: bool,
+    confirm_unmerged: bool,
+    config: config::Config,
+) -> Result<()> {
     // Normalize all inputs (handles "." and other special cases)
     let resolved_names: Vec<String> = if names.is_empty() {
         vec![super::resolve_name(None)?]
@@ -35,7 +44,6 @@ fn run_specified(names: Vec<String>, force: bool, keep_branch: bool) -> Result<(
             .collect::<Result<Vec<_>>>()?
     };
 
-    let config = config::Config::load(None)?;
     let mux = create_backend(detect_backend());
     let context = WorkflowContext::new(config, mux, None)?;
 
@@ -115,8 +123,11 @@ fn run_specified(names: Vec<String>, force: bool, keep_branch: bool) -> Result<(
             ));
         }
 
-        // Check unmerged (promptable), only if we're deleting the branch
-        if !keep_branch && let Some(base) = is_unmerged(&branch)? {
+        // Check unmerged (promptable), only if configured and we're deleting the branch
+        if confirm_unmerged
+            && !keep_branch
+            && let Some(base) = is_unmerged(&branch)?
+        {
             unmerged.push((handle, branch, base));
             continue;
         }
@@ -357,6 +368,7 @@ fn collect_bulk_removal_plan(
     mode: &BulkRemovalMode,
     force: bool,
     keep_branch: bool,
+    confirm_unmerged: bool,
 ) -> Result<BulkRemovalPlan> {
     let worktrees = git::list_worktrees()?;
     let main_branch = git::get_default_branch()?;
@@ -388,7 +400,7 @@ fn collect_bulk_removal_plan(
             continue;
         }
 
-        if mode.allow_unmerged_skip() && !force && !keep_branch {
+        if confirm_unmerged && mode.allow_unmerged_skip() && !force && !keep_branch {
             let base = git::get_branch_base(&branch)
                 .ok()
                 .unwrap_or_else(|| main_branch.clone());
@@ -445,8 +457,13 @@ fn execute_bulk_removals(
     summary
 }
 
-fn run_bulk_removal(mode: BulkRemovalMode, force: bool, keep_branch: bool) -> Result<()> {
-    let plan = collect_bulk_removal_plan(&mode, force, keep_branch)?;
+fn run_bulk_removal(
+    mode: BulkRemovalMode,
+    force: bool,
+    keep_branch: bool,
+    confirm_unmerged: bool,
+) -> Result<()> {
+    let plan = collect_bulk_removal_plan(&mode, force, keep_branch, confirm_unmerged)?;
 
     let skipped_uncommitted = split_skipped_worktrees(&plan.skipped, BulkSkipReason::Uncommitted);
     let skipped_unmerged = split_skipped_worktrees(&plan.skipped, BulkSkipReason::Unmerged);
@@ -480,16 +497,21 @@ fn run_bulk_removal(mode: BulkRemovalMode, force: bool, keep_branch: bool) -> Re
 }
 
 /// Remove all managed worktrees (except main)
-fn run_all(force: bool, keep_branch: bool) -> Result<()> {
-    run_bulk_removal(BulkRemovalMode::All, force, keep_branch)
+fn run_all(force: bool, keep_branch: bool, confirm_unmerged: bool) -> Result<()> {
+    run_bulk_removal(BulkRemovalMode::All, force, keep_branch, confirm_unmerged)
 }
 
 /// Remove worktrees whose upstream remote branch has been deleted
-fn run_gone(force: bool, keep_branch: bool) -> Result<()> {
+fn run_gone(force: bool, keep_branch: bool, confirm_unmerged: bool) -> Result<()> {
     // Fetch with prune to update remote-tracking refs
     spinner::with_spinner("Fetching from remote", git::fetch_prune)?;
     let gone_branches = git::get_gone_branches().unwrap_or_default();
-    run_bulk_removal(BulkRemovalMode::Gone(gone_branches), force, keep_branch)
+    run_bulk_removal(
+        BulkRemovalMode::Gone(gone_branches),
+        force,
+        keep_branch,
+        confirm_unmerged,
+    )
 }
 
 /// Execute the actual worktree removal

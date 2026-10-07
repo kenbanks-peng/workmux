@@ -463,6 +463,7 @@ mod tests {
             window_cmd: None,
             agent_command: None,
             agent_kind: None,
+            prompt: None,
         }
     }
 
@@ -475,6 +476,7 @@ mod tests {
             checks: None,
             check_meta: None,
             url: None,
+            closing_issues: Vec::new(),
         }
     }
 
