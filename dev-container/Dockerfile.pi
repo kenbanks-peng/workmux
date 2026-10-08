@@ -12,3 +12,9 @@ ARG CACHE_BUST=1
 # npm global bin is /usr/local/bin so the `pi` binary is reachable when
 # running as an arbitrary non-root UID (--user uid:gid).
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+# Install aven system-wide for arbitrary non-root users.
+RUN curl -fsSL https://raw.githubusercontent.com/raine/aven/main/scripts/install \
+    -o /tmp/install-aven.sh \
+    && AVEN_INSTALL_DIR=/usr/local/bin bash /tmp/install-aven.sh \
+    && rm /tmp/install-aven.sh
