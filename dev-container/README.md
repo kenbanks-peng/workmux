@@ -4,7 +4,6 @@ Run these tasks from the repository root:
 
 ```sh
 mise run dev-container:build
-mise run dev-container:config:install
 ```
 
 The image tasks use Apple `container` and build `workmux-dev:latest` from
@@ -15,8 +14,8 @@ Workmux uses the host's global config at `~/.config/workmux/config.yaml`,
 plus the repository's `.workmux.yaml`. No separate dev-container workmux
 config is needed.
 
-The config install task copies `pi/` into `~/.config/workmux/agents/pi`.
-Select that profile in the global workmux config:
+Pi config is managed directly in `~/.config/workmux/agents/pi`.
+Select that directory in the global workmux config:
 
 ```yaml
 sandbox:

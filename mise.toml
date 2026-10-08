@@ -21,8 +21,3 @@ description = "Build the workmux-dev image with Apple container"
 depends = ["dev-container:build:base"]
 dir = "{{config_root}}/dev-container"
 run = "container build --file Dockerfile.pi --build-arg BASE=workmux-dev:base --tag workmux-dev:latest ."
-
-[tasks."dev-container:config:install"]
-description = "Deploy the isolated Linux Pi profile"
-dir = "{{config_root}}"
-run = "./dev-container/scripts/install-config.sh"
