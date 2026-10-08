@@ -1,5 +1,5 @@
 # Rust
-/target
+/target/
 **/*.rs.bk
 *.pdb
 
@@ -14,17 +14,24 @@ __pycache__/
 .Python
 venv/
 .pytest_cache/
-tests/venv
 
 # Documentation
 node_modules/
-docs/.astro/
-docs/dist/
+/docs/.astro/
+/docs/dist/
 
 # Nix
 result
 result-*
 history
-.claude/temp
-
+# Local development state
+/.claude/temp/
 bin/
+
+# Dev-container Pi state and credentials
+/dev-container/**/auth.json
+/dev-container/**/sessions/
+/dev-container/**/npm/
+/dev-container/.env
+/dev-container/.env.*
+/dev-container/**/*.bak

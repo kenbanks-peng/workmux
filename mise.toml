@@ -9,3 +9,20 @@ run = """
 mkdir -p bin
 cp target/release/workmux bin/workmux
 """
+
+[tasks."dev-container:build:base"]
+hide = true
+description = "Build the workmux-dev base image with Apple container"
+dir = "{{config_root}}/dev-container"
+run = "container build --file docker/Dockerfile.base --tag workmux-dev:base ."
+
+[tasks."dev-container:build"]
+description = "Build the workmux-dev image with Apple container"
+depends = ["dev-container:build:base"]
+dir = "{{config_root}}/dev-container"
+run = "container build --file docker/Dockerfile.pi --build-arg BASE=workmux-dev:base --tag workmux-dev:latest ."
+
+[tasks."dev-container:config:install"]
+description = "Deploy the isolated Linux Pi profile"
+dir = "{{config_root}}"
+run = "./dev-container/scripts/install-config.sh"

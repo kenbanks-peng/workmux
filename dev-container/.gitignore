@@ -1,9 +1,0 @@
-# Live Pi state and credentials do not belong in this repository.
-**/auth.json
-**/sessions/
-**/bin/
-**/node_modules/
-**/npm/
-.env
-.env.*
-*.bak
