@@ -1,0 +1,8 @@
+.git
+pi
+scripts
+.env
+.env.*
+**/auth.json
+**/sessions
+**/node_modules
