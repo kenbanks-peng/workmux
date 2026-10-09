@@ -25,6 +25,10 @@ be installed in the container. Edit the TOML and rebuild to customize it.
 The Oh My Posh version is pinned in `Dockerfile.pi` and can be overridden with
 the `OH_MY_POSH_VERSION` build argument.
 
+Run `f` to open Yazi and change the shell to its last directory on exit.
+Arguments are forwarded to Yazi (for example, `f /path/to/directory`).
+Launching `yazi` directly does not change the parent shell's directory.
+
 Pi config is managed directly in `~/.config/workmux/pi/agent`.
 Select that directory in the global workmux config:
 

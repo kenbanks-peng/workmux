@@ -26,6 +26,11 @@ RUN case "$(uname -m)" in \
         -o /usr/local/bin/oh-my-posh && \
     chmod 755 /usr/local/bin/oh-my-posh
 
+# A shell function is required to change the parent shell's directory.
+COPY scripts/yazi-shell.sh /etc/yazi-shell.sh
+RUN chmod 644 /etc/yazi-shell.sh && \
+    printf '\n. /etc/yazi-shell.sh\n' >> /etc/bash.bashrc
+
 COPY oh-my-posh.toml /etc/oh-my-posh.toml
 # Debian sources this for interactive Bash shells, including login shells.
 RUN chmod 644 /etc/oh-my-posh.toml && \
