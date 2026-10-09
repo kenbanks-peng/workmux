@@ -1,6 +1,5 @@
 .git
 pi
-scripts
 .env
 .env.*
 **/auth.json
