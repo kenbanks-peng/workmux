@@ -1,7 +1,0 @@
-.git
-pi
-.env
-.env.*
-**/auth.json
-**/sessions
-**/node_modules
