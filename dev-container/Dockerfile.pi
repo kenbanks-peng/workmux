@@ -1,6 +1,12 @@
 ARG BASE=ghcr.io/raine/workmux-sandbox:base
 FROM ${BASE}
 
+# Match the host's global Git ignores for arbitrary runtime UIDs and HOME paths.
+RUN printf '%s\n' '*~' '.DS_Store' '**/.claude/' '**/.vscode/' '.mcp.json' '.env' \
+        > /etc/gitignore && \
+    chmod 644 /etc/gitignore && \
+    git config --system core.excludesFile /etc/gitignore
+
 # Install Node.js (required for pi coding agent CLI)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
