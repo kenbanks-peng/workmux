@@ -15,6 +15,23 @@ RUN curl -fsSL https://yazi-rs.github.io/builds/yazi-keyring.gpg \
     apt-get install -y --no-install-recommends yazi && \
     rm -rf /var/lib/apt/lists/*
 
+# Install a pinned Oh My Posh binary system-wide for arbitrary runtime UIDs.
+ARG OH_MY_POSH_VERSION=31.6.0
+RUN case "$(uname -m)" in \
+        aarch64|arm64) arch=arm64 ;; \
+        x86_64|amd64) arch=amd64 ;; \
+        *) echo "Unsupported Oh My Posh architecture" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/JanDeDobbeleer/oh-my-posh/releases/download/v${OH_MY_POSH_VERSION}/posh-linux-${arch}" \
+        -o /usr/local/bin/oh-my-posh && \
+    chmod 755 /usr/local/bin/oh-my-posh
+
+COPY oh-my-posh.toml /etc/oh-my-posh.toml
+# Debian sources this for interactive Bash shells, including login shells.
+RUN chmod 644 /etc/oh-my-posh.toml && \
+    printf '\neval "$(oh-my-posh init bash --config /etc/oh-my-posh.toml)"\n' \
+    >> /etc/bash.bashrc
+
 ARG CACHE_BUST=1
 
 # Install pi coding agent CLI globally.
