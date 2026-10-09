@@ -6,6 +6,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Yazi from its signed APT repository.
+RUN curl -fsSL https://yazi-rs.github.io/builds/yazi-keyring.gpg \
+        -o /usr/share/keyrings/yazi-keyring.gpg && \
+    echo 'deb [signed-by=/usr/share/keyrings/yazi-keyring.gpg] https://yazi-rs.github.io/builds/ stable main' \
+        > /etc/apt/sources.list.d/yazi.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends yazi && \
+    rm -rf /var/lib/apt/lists/*
+
 ARG CACHE_BUST=1
 
 # Install pi coding agent CLI globally.
