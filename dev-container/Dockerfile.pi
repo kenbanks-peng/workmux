@@ -15,6 +15,32 @@ RUN curl -fsSL https://yazi-rs.github.io/builds/yazi-keyring.gpg \
     apt-get install -y --no-install-recommends yazi && \
     rm -rf /var/lib/apt/lists/*
 
+# LazyVim requires a newer Neovim than Debian bookworm provides.
+ARG NEOVIM_VERSION=0.11.5
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends         gcc make unzip ripgrep fd-find && \
+    rm -rf /var/lib/apt/lists/* && \
+    ln -s /usr/bin/fdfind /usr/local/bin/fd && \
+    case "$(uname -m)" in \
+        aarch64|arm64) arch=arm64 ;; \
+        x86_64|amd64) arch=x86_64 ;; \
+        *) echo "Unsupported Neovim architecture" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NEOVIM_VERSION}/nvim-linux-${arch}.tar.gz" \
+        -o /tmp/nvim.tar.gz && \
+    mkdir -p /opt/nvim && \
+    tar -xzf /tmp/nvim.tar.gz -C /opt/nvim --strip-components=1 && \
+    rm /tmp/nvim.tar.gz && \
+    /opt/nvim/bin/nvim --version
+
+# Seed a writable LazyVim config on first use, without replacing user config.
+RUN git clone --depth=1 https://github.com/LazyVim/starter /opt/lazyvim-starter && \
+    rm -rf /opt/lazyvim-starter/.git
+COPY nvim/ /opt/lazyvim-starter/
+COPY scripts/nvim.sh /usr/local/bin/nvim
+RUN chmod 755 /usr/local/bin/nvim && \
+    chmod -R a+rX /opt/lazyvim-starter
+
 # Install a pinned Oh My Posh binary system-wide for arbitrary runtime UIDs.
 ARG OH_MY_POSH_VERSION=31.6.0
 RUN case "$(uname -m)" in \

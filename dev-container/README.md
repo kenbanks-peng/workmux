@@ -29,6 +29,17 @@ Run `f` to open Yazi and change the shell to its last directory on exit.
 Arguments are forwarded to Yazi (for example, `f /path/to/directory`).
 Launching `yazi` directly does not change the parent shell's directory.
 
+Run `nvim` to launch Neovim with LazyVim. On first launch, the image copies the
+LazyVim starter into `${XDG_CONFIG_HOME:-$HOME/.config}/${NVIM_APPNAME:-nvim}`
+without replacing existing config. LazyVim downloads plugins on first launch,
+so network access is required. Neovim is pinned and can be overridden with the
+`NEOVIM_VERSION` build argument.
+
+The starter includes `yazi.nvim`: `<leader><leader>` or `<leader>-` opens Yazi at the current file,
+`<leader>cw` opens it at Neovim's working directory, and `<Ctrl-Up>` resumes
+the last session. Opening a directory uses Yazi instead of netrw; `<F1>`
+shows help inside Yazi. These defaults apply only when seeding a new config.
+
 Pi config is managed directly in `~/.config/workmux/pi/agent`.
 Select that directory in the global workmux config:
 
