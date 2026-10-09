@@ -36,13 +36,13 @@ alignment = 'left'
 newline = true
 
 [[blocks.segments]]
-type = 'shell'
+type = 'os'
 style = 'diamond'
 leading_diamond = ''
 trailing_diamond = ''
 background = 'p:shell'
 foreground = 'p:shell-foreground'
-template = '  dev '
+template = ' {{ .Icon }} '
 
 [[blocks.segments]]
 type = 'root'
