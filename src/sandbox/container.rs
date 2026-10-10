@@ -1009,7 +1009,7 @@ fn build_docker_run_args_inner(
     let extra_mounts = config.extra_mounts();
     let git_identity = crate::git::RepositoryIdentity::discover(worktree_root).ok();
     for mount in extra_mounts {
-        let (host, guest, read_only) = mount.resolve()?;
+        let (host, guest, read_only) = super::mount_paths::resolve(mount, worktree_root)?;
         if !read_only {
             if let Some(git_identity) = &git_identity {
                 let protected = [

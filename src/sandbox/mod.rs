@@ -7,6 +7,7 @@ pub mod freshness;
 pub mod guest;
 pub(crate) mod host_exec_sandbox;
 pub mod lima;
+mod mount_paths;
 pub mod network_proxy;
 pub(crate) mod notice;
 pub(crate) mod pi;
