@@ -39,12 +39,23 @@ pub fn get_repo_root_if_present() -> Result<Option<PathBuf>> {
 }
 
 pub fn get_repo_root_if_present_in(workdir: Option<&Path>) -> Result<Option<PathBuf>> {
+    repository_path_if_present(workdir, "--git-dir")
+}
+
+/// Resolve a worktree root, distinguishing absent repositories from failed probes.
+pub(crate) fn worktree_root_if_present(path: &Path) -> Result<Option<PathBuf>> {
+    repository_path_if_present(Some(path), "--show-toplevel")
+}
+
+fn repository_path_if_present(workdir: Option<&Path>, argument: &str) -> Result<Option<PathBuf>> {
     let cwd = match workdir {
-        Some(path) => path.to_path_buf(),
+        Some(path) => path
+            .canonicalize()
+            .context("Failed to resolve repository path")?,
         None => std::env::current_dir().context("Failed to resolve current directory")?,
     };
     let output = super::unattended_git(Some(&cwd))?
-        .args(["rev-parse", "--git-dir"])
+        .args(["rev-parse", argument])
         .output()
         .context("Failed to execute git rev-parse")?;
 

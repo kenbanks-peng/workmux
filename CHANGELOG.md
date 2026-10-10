@@ -21,6 +21,13 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 <!-- skipped: v0.1.25 -->
 <!-- skipped: v0.1.8 -->
 
+## v0.1.272 (2026-10-09)
+
+- Reduce sidebar background CPU use by avoiding repeated Git calculations and project config lookups.
+- Reduce memory use for workmux commands and sidebar clients.
+- Reset sidebar scrolling to the top when focusing an agent or returning to its window.
+- Fix agents inheriting another repository's project config, and automatically pick up newly created or replaced project configs in the sidebar.
+
 ## v0.1.271 (2026-10-04)
 
 - Set `sidebar.enter_action: select` to show an agent's window with Enter while keeping sidebar focus for continued keyboard navigation; press `o` to focus the agent pane. ([#315](https://github.com/raine/workmux/issues/315))
