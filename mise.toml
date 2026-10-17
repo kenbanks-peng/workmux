@@ -3,9 +3,13 @@ description = "Build workmux for production"
 run = "cargo build --release --locked --bin workmux"
 
 [tasks.deploy]
-description = "Build and copy workmux to bin"
+description = "Build and atomically install workmux to bin"
 depends = ["build"]
 run = """
+set -eu
 mkdir -p bin
-cp target/release/workmux bin/workmux
+tmp=$(mktemp bin/.workmux.XXXXXX)
+trap 'rm -f "$tmp"' EXIT
+cp -p target/release/workmux "$tmp"
+mv -f "$tmp" bin/workmux
 """
