@@ -1960,6 +1960,12 @@ pub struct ContainerConfig {
     #[serde(default)]
     pub home: Option<String>,
 
+    /// Linux-local temporary filesystems, as guest paths with optional
+    /// colon-separated mount options. Supports a {container_home} prefix.
+    /// Global-only: writable mounts can shadow sandbox policy mounts.
+    #[serde(default)]
+    pub tmpfs: Option<Vec<String>>,
+
     /// Container runtime. Auto-detected from PATH if not set.
     #[serde(default)]
     pub runtime: Option<SandboxRuntime>,
@@ -2045,6 +2051,33 @@ impl ContainerConfig {
             .trim_end_matches('/')
     }
 
+    pub fn resolved_tmpfs(&self) -> anyhow::Result<Vec<String>> {
+        self.tmpfs
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|spec| {
+                let expanded = if spec == "{container_home}"
+                    || spec.starts_with("{container_home}/")
+                    || spec.starts_with("{container_home}:")
+                {
+                    spec.replacen("{container_home}", self.home(), 1)
+                } else {
+                    spec.clone()
+                };
+                let target = expanded.split(':').next().unwrap_or("");
+                anyhow::ensure!(
+                    target.starts_with('/')
+                        && !target.trim_matches('/').is_empty()
+                        && !target.split('/').any(|part| matches!(part, "." | ".."))
+                        && !expanded.chars().any(char::is_control),
+                    "sandbox.container.tmpfs requires absolute non-root guest paths without . or .."
+                );
+                Ok(expanded)
+            })
+            .collect()
+    }
+
     pub fn runtime(&self) -> SandboxRuntime {
         self.runtime.unwrap_or_else(SandboxRuntime::detect)
     }
@@ -2094,6 +2127,7 @@ impl ContainerConfig {
                 "sandbox.container.home must be an absolute non-root Linux path without ., .., commas, colons or control characters"
             );
         }
+        self.resolved_tmpfs()?;
         for d in self.devices() {
             d.validate()?;
         }
@@ -2122,8 +2156,15 @@ impl ContainerConfig {
                 move it to your global config (~/.config/workmux/config.yaml)"
             );
         }
+        if project.tmpfs.is_some() {
+            tracing::warn!(
+                "sandbox.container.tmpfs in project config (.workmux.yaml) is ignored -- \
+                move it to your global config (~/.config/workmux/config.yaml)"
+            );
+        }
         Self {
             home: global.home,
+            tmpfs: global.tmpfs,
             runtime: project.runtime.or(global.runtime),
             cpus: project.cpus.or(global.cpus),
             memory: project.memory.or(global.memory),
@@ -6210,6 +6251,58 @@ extra_mounts:
         let project = sandbox_agent_config_dir("~/project/{agent}");
         let merged = global.merge(project);
         assert!(merged.sandbox.agent_config_dir.is_none());
+    }
+
+    #[test]
+    fn container_tmpfs_expands_home_and_validates_paths() {
+        let mut config = ContainerConfig {
+            home: Some("/custom/home".into()),
+            tmpfs: Some(vec![
+                "{container_home}/sessions:uid=501,gid=20,mode=0700".into(),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.resolved_tmpfs().unwrap(),
+            ["/custom/home/sessions:uid=501,gid=20,mode=0700"]
+        );
+        for invalid in [
+            "relative",
+            "/",
+            "///",
+            "/foo/../bar",
+            "/foo/./bar",
+            "/foo\n",
+        ] {
+            config.tmpfs = Some(vec![invalid.into()]);
+            assert!(config.validate().is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn container_tmpfs_is_global_only() {
+        let global: Config =
+            serde_yaml::from_str("sandbox:\n  container:\n    tmpfs: [/trusted]").unwrap();
+        let project: Config =
+            serde_yaml::from_str("sandbox:\n  container:\n    tmpfs: [/untrusted]").unwrap();
+        assert_eq!(
+            global
+                .merge(project.clone())
+                .sandbox
+                .container
+                .resolved_tmpfs()
+                .unwrap(),
+            ["/trusted"]
+        );
+        assert!(
+            Config::default()
+                .merge(project)
+                .sandbox
+                .container
+                .resolved_tmpfs()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

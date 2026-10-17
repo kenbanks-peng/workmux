@@ -1058,6 +1058,29 @@ fn build_docker_run_args_inner(
         args.push(mount_arg);
     }
 
+    // Append tmpfs after bind mounts so nested socket directories stay
+    // Linux-local even when their parent holds persistent host state.
+    for spec in config.container.resolved_tmpfs()? {
+        let target = Path::new(spec.split(':').next().unwrap());
+        if let Some(identity) = &git_identity {
+            let worktree_dot_git = worktree_root.join(".git");
+            anyhow::ensure!(
+                ![
+                    &identity.dot_git,
+                    &identity.admin_dir,
+                    &identity.common_dir,
+                    &worktree_dot_git
+                ]
+                .iter()
+                .any(|path| target.starts_with(path) || path.starts_with(target)),
+                "Tmpfs mount at {} overlaps protected Git metadata",
+                target.display()
+            );
+        }
+        args.push("--tmpfs".into());
+        args.push(spec);
+    }
+
     args.push("--workdir".to_string());
     args.push(pane_cwd_str.to_string());
 
@@ -2359,6 +2382,62 @@ mod tests {
             "type=bind,source={},target=/custom/home/.aven",
             main.join(".aven").canonicalize().unwrap().display()
         )));
+    }
+
+    #[test]
+    fn tmpfs_mount_follows_persistent_state_for_all_runtimes() {
+        use crate::config::ExtraMount;
+        for runtime in [
+            SandboxRuntime::Docker,
+            SandboxRuntime::Podman,
+            SandboxRuntime::AppleContainer,
+        ] {
+            let mut config = sandbox_config(runtime, |_| {});
+            config.extra_mounts = Some(vec![ExtraMount::Spec {
+                host_path: "/host/nono/state".into(),
+                guest_path: Some("{container_home}/.local/state".into()),
+                writable: Some(true),
+                optional: false,
+            }]);
+            config.container.tmpfs = Some(vec![
+                "{container_home}/.local/state/nono/sessions:uid=501,gid=20,mode=0700".into(),
+            ]);
+            let args = test_build_run_args(&config, false);
+            let parent = args
+                .iter()
+                .position(|arg| {
+                    arg == "type=bind,source=/host/nono/state,target=/home/dev/.local/state"
+                })
+                .unwrap();
+            let tmpfs = args.iter().position(|arg| arg == "--tmpfs").unwrap();
+            assert!(tmpfs > parent);
+            assert_eq!(
+                args[tmpfs + 1],
+                "/home/dev/.local/state/nono/sessions:uid=501,gid=20,mode=0700"
+            );
+        }
+    }
+
+    #[test]
+    fn tmpfs_cannot_shadow_protected_git_metadata() {
+        let (_temp, _main, worktree) = linked_worktree();
+        let identity = crate::git::RepositoryIdentity::discover(&worktree).unwrap();
+        for target in [
+            &identity.dot_git,
+            &identity.admin_dir,
+            &identity.common_dir,
+            &worktree,
+        ] {
+            let mut config = make_config();
+            config.container.tmpfs = Some(vec![target.display().to_string()]);
+            let error =
+                test_build_run_args_result_for_worktree(&worktree, &config, false).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("overlaps protected Git metadata")
+            );
+        }
     }
 
     #[test]

@@ -62,6 +62,39 @@ workmux sandbox pull
 | `network.allowed_domains` | `[]`                                    | Allowed outbound HTTPS domains when policy is `deny`. Supports exact matches, `*.` wildcard prefixes, and exact-host private destination opt-in. **Global config only.**                                                                                                                              |
 | `network.max_connections` | `128`                                   | Maximum concurrent HTTPS proxy connections in deny mode. Must be between 1 and 1024. **Global config only.**                                                                                                                                                                                          |
 
+### Temporary filesystems
+
+Set `sandbox.container.tmpfs` in **global** config for Linux-local temporary
+directories. Each entry is an absolute guest path followed by optional
+colon-separated runtime mount options. A leading `{container_home}` expands
+to the configured home. Root paths, `.`/`..` components, and mounts overlapping
+protected Git metadata are rejected.
+
+These mounts follow extra bind mounts, so a nested socket directory can stay
+Linux-local while its parent persists on the host. This is useful for Unix
+sockets that macOS bind mounts cannot support:
+
+```yaml
+sandbox:
+  container:
+    tmpfs:
+      - "{container_home}/.local/state/nono/sessions:uid=501,gid=20,mode=0700"
+  extra_mounts:
+    - host_path: ~/.config/linux/nono/state
+      guest_path: "{container_home}/.local/state"
+      writable: true
+    - host_path: ~/.config/linux/nono/config
+      guest_path: "{container_home}/.config/nono"
+      writable: true
+```
+
+Use your host UID and GID (`id -u` and `id -g`), since containers run as that
+user. These example mounts accompany a Pi profile that uses nono credential
+placeholders; the matching nono state must come from the same credential
+import. Share only trusted state: writable mounts let the container modify
+those host files. Temporary filesystem contents disappear when the container
+exits. Project overrides are ignored.
+
 ### Container home
 
 Set `sandbox.container.home` in your **global** config to choose the guest home
