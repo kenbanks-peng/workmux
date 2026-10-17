@@ -1664,6 +1664,7 @@ pub enum ExtraMount {
     Spec {
         host_path: String,
         #[serde(default)]
+        // Container backend also accepts a {container_home} prefix.
         guest_path: Option<String>,
         #[serde(default)]
         writable: Option<bool>,
@@ -1935,6 +1936,11 @@ pub(crate) fn validate_group_add_entry(group: &str) -> anyhow::Result<()> {
 /// Nested under `sandbox.container` in YAML.
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct ContainerConfig {
+    /// Absolute guest home directory. Global-only: changing it redirects
+    /// credential mounts. The image must make it writable by the runtime UID.
+    #[serde(default)]
+    pub home: Option<String>,
+
     /// Container runtime. Auto-detected from PATH if not set.
     #[serde(default)]
     pub runtime: Option<SandboxRuntime>,
@@ -2013,6 +2019,13 @@ pub struct ContainerConfig {
 }
 
 impl ContainerConfig {
+    pub fn home(&self) -> &str {
+        self.home
+            .as_deref()
+            .unwrap_or("/home/dev")
+            .trim_end_matches('/')
+    }
+
     pub fn runtime(&self) -> SandboxRuntime {
         self.runtime.unwrap_or_else(SandboxRuntime::detect)
     }
@@ -2048,8 +2061,20 @@ impl ContainerConfig {
         self.excluded_files.as_deref().unwrap_or(&[])
     }
 
-    /// Structural validation for hardware access fields. Called at config load.
+    /// Structural validation for container settings, also enforced before launch.
     pub fn validate(&self) -> anyhow::Result<()> {
+        let home = self.home();
+        if !home.starts_with('/')
+            || home.is_empty()
+            || home
+                .chars()
+                .any(|c| c.is_control() || matches!(c, ',' | ':'))
+            || home.split('/').any(|part| matches!(part, "." | ".."))
+        {
+            anyhow::bail!(
+                "sandbox.container.home must be an absolute non-root Linux path without ., .., commas, colons or control characters"
+            );
+        }
         for d in self.devices() {
             d.validate()?;
         }
@@ -2059,10 +2084,9 @@ impl ContainerConfig {
         Ok(())
     }
 
-    /// Merge: project overrides global, per-field, EXCEPT for `devices`,
-    /// `group_add`, `oci_runtime`, `cap_add` and `security_opt` which are
-    /// security-sensitive and global-only. Warnings for project-level attempts
-    /// are emitted in `Config::merge` where both values are visible.
+    /// Merge: project overrides global for runtime and resource limits only.
+    /// Home redirects credential mounts; the remaining fields control access
+    /// and isolation. These are global-only, with warnings for project attempts.
     fn merge(global: Self, project: Self) -> Self {
         // Security: excluded_files is global-only. Project config cannot set it --
         // otherwise a repo's .workmux.yaml could delete user-level secret
@@ -2073,7 +2097,14 @@ impl ContainerConfig {
                 move it to your global config (~/.config/workmux/config.yaml)"
             );
         }
+        if project.home.is_some() {
+            tracing::warn!(
+                "sandbox.container.home in project config (.workmux.yaml) is ignored -- \
+                move it to your global config (~/.config/workmux/config.yaml)"
+            );
+        }
         Self {
+            home: global.home,
             runtime: project.runtime.or(global.runtime),
             cpus: project.cpus.or(global.cpus),
             memory: project.memory.or(global.memory),
@@ -3819,6 +3850,7 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 #   backend: lima
 #   # host_commands: ["just", "cargo", "npm"]
 #   # container:
+#   #   home: /home/dev           # Guest HOME; global-only; must be writable
 #   #   runtime: docker          # docker | podman | apple-container
 #   #   # memory: 16G            # VM memory limit (apple-container default: 16G)
 #   #   # cpus: 4                # VM CPU count (only passed when set)
@@ -6237,6 +6269,59 @@ container:
         let accepted: LimaConfig =
             serde_yaml::from_str("accept_reduced_git_metadata_isolation: true\n").unwrap();
         assert!(accepted.accepts_reduced_git_metadata_isolation());
+    }
+
+    #[test]
+    fn container_home_defaults_and_yaml() {
+        assert_eq!(ContainerConfig::default().home(), "/home/dev");
+        let config: ContainerConfig = serde_yaml::from_str("home: /custom/home/").unwrap();
+        assert_eq!(config.home(), "/custom/home");
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn container_home_rejects_invalid_guest_paths() {
+        for home in [
+            "",
+            "/",
+            "///",
+            "relative",
+            "~/home",
+            "/home/../tmp",
+            "/home/./dev",
+            "/home/dev,readonly",
+            "/home/dev:bin",
+            "/home/dev\n",
+        ] {
+            let config = ContainerConfig {
+                home: Some(home.into()),
+                ..Default::default()
+            };
+            assert!(config.validate().is_err(), "accepted {home:?}");
+        }
+    }
+
+    #[test]
+    fn container_home_is_global_only() {
+        let global = container_cfg(|c| c.home = Some("/global/home".into()));
+        let project = container_cfg(|c| c.home = Some("/project/home".into()));
+        assert_eq!(
+            global
+                .clone()
+                .merge(project.clone())
+                .sandbox
+                .container
+                .home(),
+            "/global/home"
+        );
+        assert_eq!(
+            global.merge(Config::default()).sandbox.container.home(),
+            "/global/home"
+        );
+        assert_eq!(
+            Config::default().merge(project).sandbox.container.home(),
+            "/home/dev"
+        );
     }
 
     #[test]

@@ -62,6 +62,47 @@ workmux sandbox pull
 | `network.allowed_domains` | `[]`                                    | Allowed outbound HTTPS domains when policy is `deny`. Supports exact matches, `*.` wildcard prefixes, and exact-host private destination opt-in. **Global config only.**                                                                                                                              |
 | `network.max_connections` | `128`                                   | Maximum concurrent HTTPS proxy connections in deny mode. Must be between 1 and 1024. **Global config only.**                                                                                                                                                                                          |
 
+### Container home
+
+Set `sandbox.container.home` in your **global** config to choose the guest home
+(default: `/home/dev`):
+
+```yaml
+sandbox:
+  container:
+    home: /home/dev
+```
+
+Workmux derives `HOME`, agent credential/config mounts, Pi's binary overlay,
+`CODEX_HOME`, and the home-local binary search path from this one setting.
+It takes precedence over `HOME` and `CODEX_HOME` supplied through generic
+environment settings. Project overrides are ignored because this setting
+redirects credential mounts.
+
+Use an absolute Linux path; tilde expansion is not supported. The image must
+make the home and its XDG parent directories writable by the runtime UID.
+Rebuild bundled sandbox images when upgrading from the old `/tmp` layout.
+Avoid temporary directories for Codex, which refuses to create helper binaries
+there. Extra mounts can reference the configured home using a
+`{container_home}` guest-path prefix:
+
+```yaml
+sandbox:
+  container:
+    home: /home/dev
+  extra_mounts:
+    - host_path: "{project_root}/.aven"
+      guest_path: "{container_home}/.aven"
+      writable: true
+```
+
+This mounts the project's shared Aven directory at `/home/dev/.aven`.
+Workers can access its database with `aven --db "$HOME/.aven/tasks.db"`,
+so changing `container.home` updates both paths automatically. Initialize
+the host `.aven` directory before launching. The `{container_home}` prefix
+is container-only; literal extra-mount destinations and the host-exec shim
+directory remain independent of HOME.
+
 ### Example configurations
 
 **Minimal:**
@@ -246,12 +287,12 @@ claude -- "$(cat .workmux/PROMPT-feature-x.md)"
 # With sandbox (Docker example):
 docker run --rm -it \
   --user 501:20 \
-  --env HOME=/tmp \
+  --env HOME=/home/dev \
   --mount type=bind,source=/path/to/worktree,target=/path/to/worktree \
   --mount type=bind,source=/path/to/main/.git,target=/path/to/main/.git,readonly \
   --mount type=bind,source=/path/to/main,target=/path/to/main,readonly \
-  --mount type=bind,source=~/.claude-sandbox.json,target=/tmp/.claude.json \
-  --mount type=bind,source=~/.claude,target=/tmp/.claude \
+  --mount type=bind,source=~/.claude-sandbox.json,target=/home/dev/.claude.json \
+  --mount type=bind,source=~/.claude,target=/home/dev/.claude \
   --workdir /path/to/worktree \
   workmux-sandbox:claude \
   sh -c 'claude -- "$(cat .workmux/PROMPT-feature-x.md)"'
@@ -296,7 +337,7 @@ installation. A host-side
 Hook installers run inside the container may fail with `Read-only file system`
 or `Resource busy`. Ordinary Git operations remain available.
 
-For Claude specifically, a separate config file is mounted to `/tmp/.claude.json`. Docker/Podman mount `~/.claude-sandbox.json` directly; Apple Container mounts the `~/.claude-sandbox-config/` directory (since it only supports directory mounts).
+For Claude specifically, a separate config file is mounted to `$HOME/.claude.json`, where HOME is `sandbox.container.home`. Docker/Podman mount `~/.claude-sandbox.json` directly; Apple Container mounts the `~/.claude-sandbox-config/` directory (since it only supports directory mounts).
 
 ### Networking
 

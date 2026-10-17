@@ -13,6 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     util-linux \
     && rm -rf /var/lib/apt/lists/*
 
+# A home writable by arbitrary host UIDs. For a custom sandbox.container.home,
+# the image must provision that directory with equivalent permissions.
+RUN mkdir -p /home/dev/.local /home/dev/.config /home/dev/.cache && \
+    chown -R 65534:65534 /home/dev && \
+    chmod 1777 /home/dev /home/dev/.local /home/dev/.config /home/dev/.cache
+# Do not change build-time HOME: descendant installers use /root. Workmux
+# supplies the configured guest HOME when launching the container.
+
 # Embed network init script (sets up iptables firewall, then drops privileges)
 RUN cat <<'SCRIPT' > /usr/local/bin/network-init.sh
 #!/bin/bash
@@ -95,7 +103,7 @@ fi
 # --inh-caps=-all drops inheritable capabilities; the setpriv man page warns
 # that dropping UID/GID does not by itself reset capabilities.
 #
-# HOME=/tmp is preserved because downstream login shells may otherwise reset
+# The configured HOME is preserved because downstream login shells may otherwise reset
 # it to "/" (for UIDs not in /etc/passwd), breaking agents that look up their
 # config dirs relative to HOME.
 GROUPS_ARG="${WM_TARGET_GID}"
@@ -108,7 +116,7 @@ exec setpriv \
     --regid "${WM_TARGET_GID}" \
     --groups "${GROUPS_ARG}" \
     --inh-caps=-all \
-    env HOME=/tmp "$@"
+    env HOME="${HOME:-/home/dev}" "$@"
 SCRIPT
 RUN chmod +x /usr/local/bin/network-init.sh
 

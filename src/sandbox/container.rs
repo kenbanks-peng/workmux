@@ -732,6 +732,8 @@ fn build_docker_run_args_inner(
     network_deny: bool,
     state_root: Option<&Path>,
 ) -> Result<Vec<String>> {
+    config.container.validate()?;
+    let home = config.container.home();
     let image = config.resolved_image(agent);
     let worktree_root_str = worktree_root.to_string_lossy();
     let pane_cwd_str = pane_cwd.to_string_lossy();
@@ -1009,7 +1011,7 @@ fn build_docker_run_args_inner(
     let extra_mounts = config.extra_mounts();
     let git_identity = crate::git::RepositoryIdentity::discover(worktree_root).ok();
     for mount in extra_mounts {
-        let (host, guest, read_only) = super::mount_paths::resolve(mount, worktree_root)?;
+        let (host, guest, read_only) = super::mount_paths::resolve(mount, worktree_root, home)?;
         if !read_only {
             if let Some(git_identity) = &git_identity {
                 let protected = [
@@ -1055,17 +1057,6 @@ fn build_docker_run_args_inner(
     args.push("--workdir".to_string());
     args.push(pane_cwd_str.to_string());
 
-    args.push("--env".to_string());
-    args.push("HOME=/tmp".to_string());
-
-    // Codex refuses to create helper binaries when CODEX_HOME is under a
-    // temporary directory (i.e. /tmp). Setting CODEX_HOME to a non-temp path
-    // avoids this while keeping HOME=/tmp like the other agents.
-    if agent == "codex" {
-        args.push("--env".to_string());
-        args.push("CODEX_HOME=/home/user/.codex".to_string());
-    }
-
     // Agent-specific credential mounts
     // Claude uses ~/.claude-sandbox-config/claude.json for container-specific config.
     // Apple Container only supports directory mounts, so we mount the directory
@@ -1077,14 +1068,14 @@ fn build_docker_run_args_inner(
         if runtime.supports_file_mounts() && paths.config_file.exists() {
             args.push("--mount".to_string());
             args.push(format!(
-                "type=bind,source={},target=/tmp/.claude.json",
+                "type=bind,source={},target={home}/.claude.json",
                 paths.config_file.display()
             ));
             false
         } else if !runtime.supports_file_mounts() && paths.config_dir.exists() {
             args.push("--mount".to_string());
             args.push(format!(
-                "type=bind,source={},target=/tmp/.claude-sandbox-config",
+                "type=bind,source={},target={home}/.claude-sandbox-config",
                 paths.config_dir.display()
             ));
             true
@@ -1097,15 +1088,16 @@ fn build_docker_run_args_inner(
 
     // Mount agent config directory
     if let Some(config_dir) = config.resolved_agent_config_dir(agent) {
-        let target = match agent {
-            "claude" => "/tmp/.claude",
-            "gemini" => "/tmp/.gemini",
-            "codex" => "/home/user/.codex",
-            "opencode" => "/tmp/.local/share/opencode",
-            "pi" => "/tmp/.pi/agent",
-            "omp" => "/tmp/.omp/agent",
+        let suffix = match agent {
+            "claude" => ".claude",
+            "gemini" => ".gemini",
+            "codex" => ".codex",
+            "opencode" => ".local/share/opencode",
+            "pi" => ".pi/agent",
+            "omp" => ".omp/agent",
             _ => unreachable!(), // resolved_agent_config_dir returns None for unknown agents
         };
+        let target = format!("{home}/{suffix}");
         let _ = std::fs::create_dir_all(&config_dir);
         args.push("--mount".to_string());
         args.push(format!(
@@ -1140,7 +1132,7 @@ fn build_docker_run_args_inner(
             let overlay = crate::sandbox::pi::pi_bin_overlay_dir(&state_dir)?;
             args.push("--mount".to_string());
             args.push(format!(
-                "type=bind,source={},target=/tmp/.pi/agent/bin",
+                "type=bind,source={},target={home}/.pi/agent/bin",
                 overlay.display()
             ));
         }
@@ -1153,7 +1145,7 @@ fn build_docker_run_args_inner(
         && let Some(cfg_dir) = crate::agent_setup::opencode::opencode_config_dir()
         && cfg_dir.is_dir()
     {
-        let target = "/tmp/.config/opencode";
+        let target = format!("{home}/.config/opencode");
         args.push("--mount".to_string());
         args.push(format!(
             "type=bind,source={},target={},readonly",
@@ -1190,13 +1182,22 @@ fn build_docker_run_args_inner(
         args.push(format!("{}={}", key, value));
     }
 
-    // Include $HOME/.local/bin so runtime-installed tools are found (HOME=/tmp).
+    // Home-dependent mounts and environment must agree, even when generic
+    // environment overrides request a different home.
+    args.push("--env".to_string());
+    args.push(format!("HOME={home}"));
+    if agent == "codex" {
+        args.push("--env".to_string());
+        args.push(format!("CODEX_HOME={home}/.codex"));
+    }
+
+    // Include the configured home so runtime-installed tools are found.
     // Prepend shim directory when host-exec is configured.
     let sbin = if network_deny { ":/usr/sbin:/sbin" } else { "" };
     let path = if shim_host_dir.is_some() {
-        format!("/tmp/.workmux-shims/bin:/tmp/.local/bin:/usr/local/bin:/usr/bin:/bin{sbin}")
+        format!("/tmp/.workmux-shims/bin:{home}/.local/bin:/usr/local/bin:/usr/bin:/bin{sbin}")
     } else {
-        format!("/tmp/.local/bin:/usr/local/bin:/usr/bin:/bin{sbin}")
+        format!("{home}/.local/bin:/usr/local/bin:/usr/bin:/bin{sbin}")
     };
     args.push("--env".to_string());
     args.push(format!("PATH={}", path));
@@ -1209,14 +1210,27 @@ fn build_docker_run_args_inner(
     //
     // For Apple Container with Claude, we symlink the config file from the
     // mounted directory since Apple Container doesn't support file mounts.
-    let wrapped_command = if needs_claude_config_symlink {
+    let mut wrapped_command = if needs_claude_config_symlink {
         format!(
-            "ln -sf /tmp/.claude-sandbox-config/claude.json /tmp/.claude.json; {}",
+            "ln -sf {} {}; {}",
+            crate::shell::shell_quote(&format!("{home}/.claude-sandbox-config/claude.json")),
+            crate::shell::shell_quote(&format!("{home}/.claude.json")),
             command
         )
     } else {
         command.to_string()
     };
+
+    // Claude's native installer checks a home-relative launcher. Create it
+    // at runtime rather than baking a particular HOME into the image.
+    if agent == "claude" {
+        wrapped_command = format!(
+            "if [ -x /usr/local/bin/claude ]; then mkdir -p {} && ln -sf /usr/local/bin/claude {}; fi; {}",
+            crate::shell::shell_quote(&format!("{home}/.local/bin")),
+            crate::shell::shell_quote(&format!("{home}/.local/bin/claude")),
+            wrapped_command
+        );
+    }
 
     if network_deny {
         // In deny mode, wrap command with network-init.sh which sets up
@@ -1685,7 +1699,7 @@ mod tests {
         assert!(args.contains(&"test-image:latest".to_string()));
         assert!(args.contains(&"sh".to_string()));
         assert!(args.contains(&"-c".to_string()));
-        assert!(args.contains(&"claude".to_string()));
+        assert!(args.last().unwrap().ends_with("; claude"));
     }
 
     #[test]
@@ -2294,15 +2308,232 @@ mod tests {
     }
 
     #[test]
+    fn configured_home_expands_extra_mount_destinations() {
+        use crate::config::ExtraMount;
+        for home in ["/home/dev", "/custom/home"] {
+            let mut config = make_config();
+            config.container.home = Some(home.into());
+            config.extra_mounts = Some(vec![
+                ExtraMount::Spec {
+                    host_path: "/host/tasks".into(),
+                    guest_path: Some("{container_home}/.aven".into()),
+                    writable: Some(true),
+                },
+                ExtraMount::Spec {
+                    host_path: "/host/home".into(),
+                    guest_path: Some("{container_home}".into()),
+                    writable: Some(false),
+                },
+            ]);
+            let args = test_build_run_args(&config, false);
+            assert!(args.contains(&format!("type=bind,source=/host/tasks,target={home}/.aven")));
+            assert!(args.contains(&format!(
+                "type=bind,source=/host/home,target={home},readonly"
+            )));
+        }
+    }
+
+    #[test]
+    fn configured_home_and_project_root_expand_in_the_same_mount() {
+        use crate::config::ExtraMount;
+        let (_temp, main, worktree) = linked_worktree();
+        std::fs::create_dir_all(main.join(".aven")).unwrap();
+        let mut config = make_config();
+        config.container.home = Some("/custom/home".into());
+        config.extra_mounts = Some(vec![ExtraMount::Spec {
+            host_path: "{project_root}/.aven".into(),
+            guest_path: Some("{container_home}/.aven".into()),
+            writable: Some(true),
+        }]);
+        let args = test_build_args(&worktree, &config);
+        assert!(args.contains(&format!(
+            "type=bind,source={},target=/custom/home/.aven",
+            main.join(".aven").canonicalize().unwrap().display()
+        )));
+    }
+
+    #[test]
+    fn configured_home_controls_all_agent_profiles() {
+        let temp = tempfile::tempdir().unwrap();
+        for runtime in [
+            SandboxRuntime::Docker,
+            SandboxRuntime::Podman,
+            SandboxRuntime::AppleContainer,
+        ] {
+            for (agent, suffix) in [
+                ("claude", ".claude"),
+                ("gemini", ".gemini"),
+                ("codex", ".codex"),
+                ("opencode", ".local/share/opencode"),
+                ("pi", ".pi/agent"),
+                ("omp", ".omp/agent"),
+            ] {
+                let mut config = agent_sandbox_config_with_dir(runtime, temp.path());
+                config.container.home = Some("/custom/agent home/".into());
+                let args = test_build_run_args_for_agent_with_state(agent, &config, temp.path());
+                assert!(args.iter().any(|a| a == "HOME=/custom/agent home"));
+                assert!(
+                    args.iter()
+                        .any(|a| a.contains(&format!("target=/custom/agent home/{suffix}"))),
+                    "{agent}: {args:?}"
+                );
+                assert!(args.iter().any(
+                    |a| a == "PATH=/custom/agent home/.local/bin:/usr/local/bin:/usr/bin:/bin"
+                ));
+                assert!(
+                    !args
+                        .iter()
+                        .any(|a| a.contains("/home/dev/") || a.contains("target=/tmp/.")),
+                    "{agent}: {args:?}"
+                );
+                if agent == "pi" {
+                    assert!(
+                        args.iter()
+                            .any(|a| a.contains("target=/custom/agent home/.pi/agent/bin"))
+                    );
+                }
+                if agent == "codex" {
+                    assert!(
+                        args.iter()
+                            .any(|a| a == "CODEX_HOME=/custom/agent home/.codex")
+                    );
+                }
+                if agent == "claude" {
+                    assert!(
+                        args.last()
+                            .unwrap()
+                            .contains("'/custom/agent home/.local/bin/claude'")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn configured_home_controls_auxiliary_config_mounts() {
+        // Isolate host config discovery without changing the parallel test
+        // runner's HOME or depending on the developer's real profile.
+        if std::env::var_os("WM_CONTAINER_HOME_CHILD").is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "sandbox::container::tests::configured_home_controls_auxiliary_config_mounts",
+                ])
+                .env("HOME", home.path())
+                .env("XDG_CONFIG_HOME", home.path().join(".config"))
+                .env_remove("OPENCODE_CONFIG_DIR")
+                .env("WM_CONTAINER_HOME_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let host = home::home_dir().unwrap();
+        std::fs::create_dir_all(host.join(".config/opencode")).unwrap();
+        std::fs::create_dir_all(host.join(".claude-sandbox-config")).unwrap();
+        std::fs::write(host.join(".claude-sandbox-config/claude.json"), "{}").unwrap();
+        std::fs::write(host.join(".claude-sandbox.json"), "{}").unwrap();
+        for runtime in [
+            SandboxRuntime::Docker,
+            SandboxRuntime::Podman,
+            SandboxRuntime::AppleContainer,
+        ] {
+            let mut config = agent_sandbox_config_with_dir(runtime, &host);
+            config.container.home = Some("/guest/agent's home".into());
+            let args = test_build_run_args_for_agent("opencode", &config);
+            assert!(
+                args.iter()
+                    .any(|a| a.contains("target=/guest/agent's home/.config/opencode,readonly"))
+            );
+            let args = test_build_run_args_for_agent("claude", &config);
+            let target = if runtime.supports_file_mounts() {
+                "target=/guest/agent's home/.claude.json"
+            } else {
+                "target=/guest/agent's home/.claude-sandbox-config"
+            };
+            assert!(args.iter().any(|a| a.contains(target)), "{args:?}");
+            if !runtime.supports_file_mounts() {
+                let command = args.last().unwrap();
+                assert!(command.contains(&crate::shell::shell_quote(
+                    "/guest/agent's home/.claude-sandbox-config/claude.json"
+                )));
+                // Validate the generated shell quoting without launching it.
+                assert!(
+                    std::process::Command::new("sh")
+                        .args(["-n", "-c", command])
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn configured_home_overrides_generic_environment_in_both_network_modes() {
+        for deny in [false, true] {
+            let mut config = make_config();
+            config.container.home = Some("/custom/home".into());
+            config.env = Some(std::collections::HashMap::from([
+                ("HOME".into(), "/wrong/home".into()),
+                ("CODEX_HOME".into(), "/wrong/codex".into()),
+            ]));
+            let args = build_docker_run_args(
+                "codex",
+                &config,
+                "codex",
+                Path::new("/tmp/project"),
+                Path::new("/tmp/project"),
+                &[("HOME", "/wrong/extra")],
+                Some(Path::new("/host/shims")),
+                deny,
+            )
+            .unwrap();
+            assert_eq!(
+                args.iter().rev().find(|a| a.starts_with("HOME=")).unwrap(),
+                "HOME=/custom/home"
+            );
+            assert_eq!(
+                args.iter()
+                    .rev()
+                    .find(|a| a.starts_with("CODEX_HOME="))
+                    .unwrap(),
+                "CODEX_HOME=/custom/home/.codex"
+            );
+            let path = args.iter().find(|a| a.starts_with("PATH=")).unwrap();
+            assert!(path.starts_with("PATH=/tmp/.workmux-shims/bin:/custom/home/.local/bin:"));
+            assert_eq!(path.contains("/usr/sbin"), deny);
+        }
+    }
+
+    #[test]
+    fn invalid_container_home_is_rejected_before_launch() {
+        let mut config = make_config();
+        config.container.home = Some("relative/home".into());
+        assert!(
+            test_build_run_args_result(&config, false)
+                .unwrap_err()
+                .to_string()
+                .contains("sandbox.container.home")
+        );
+    }
+
+    #[test]
     fn test_build_args_gemini_agent_credential_mount() {
         let args = test_build_run_args_for_agent("gemini", &make_config());
         assert_agent_credential_mount(
             &args,
-            Some("/tmp/.gemini"),
+            Some("/home/dev/.gemini"),
             &[
-                "target=/tmp/.claude.json",
-                "target=/tmp/.claude,",
-                "/home/user/.codex",
+                "target=/home/dev/.claude.json",
+                "target=/home/dev/.claude,",
+                "/home/dev/.codex",
             ],
         );
     }
@@ -2312,10 +2543,10 @@ mod tests {
         let args = test_build_run_args_for_agent("codex", &make_config());
         assert_agent_credential_mount(
             &args,
-            Some("/home/user/.codex"),
-            &["target=/tmp/.claude.json", "target=/tmp/.gemini"],
+            Some("/home/dev/.codex"),
+            &["target=/home/dev/.claude.json", "target=/home/dev/.gemini"],
         );
-        assert!(args.iter().any(|a| a == "CODEX_HOME=/home/user/.codex"));
+        assert!(args.iter().any(|a| a == "CODEX_HOME=/home/dev/.codex"));
     }
 
     #[test]
@@ -2323,8 +2554,8 @@ mod tests {
         let args = test_build_run_args_for_agent("opencode", &make_config());
         assert_agent_credential_mount(
             &args,
-            Some("/tmp/.local/share/opencode"),
-            &["target=/tmp/.claude.json", "target=/tmp/.gemini"],
+            Some("/home/dev/.local/share/opencode"),
+            &["target=/home/dev/.claude.json", "target=/home/dev/.gemini"],
         );
     }
 
@@ -2335,10 +2566,10 @@ mod tests {
             &args,
             None,
             &[
-                "target=/tmp/.claude",
-                "target=/tmp/.gemini",
-                "/home/user/.codex",
-                "target=/tmp/.local/share/opencode",
+                "target=/home/dev/.claude",
+                "target=/home/dev/.gemini",
+                "/home/dev/.codex",
+                "target=/home/dev/.local/share/opencode",
             ],
         );
     }
@@ -2357,7 +2588,7 @@ mod tests {
 
         let args_str = args.join(" ");
         assert!(args_str.contains(&format!(
-            "type=bind,source={},target=/tmp/.claude",
+            "type=bind,source={},target=/home/dev/.claude",
             claude_dir.display()
         )));
     }
@@ -2399,7 +2630,7 @@ mod tests {
         assert_eq!(args[image_idx + 1], "network-init.sh");
         assert_eq!(args[image_idx + 2], "sh");
         assert_eq!(args[image_idx + 3], "-c");
-        assert_eq!(args[image_idx + 4], "claude");
+        assert!(args[image_idx + 4].ends_with("; claude"));
     }
 
     #[test]
@@ -2621,18 +2852,18 @@ mod tests {
         let args = test_build_run_args_for_agent_with_state("pi", &config, tmp.path());
 
         let args_str = args.join(" ");
-        // Pi agent should mount ~/.pi/agent to /tmp/.pi/agent
+        // Pi agent should mount ~/.pi/agent to /home/dev/.pi/agent
         assert!(
-            args_str.contains("/tmp/.pi/agent"),
+            args_str.contains("/home/dev/.pi/agent"),
             "pi agent config mount missing: {}",
             args_str
         );
         // Claude-specific mounts stay absent.
         assert!(
-            !args_str.contains("/tmp/.claude.json"),
+            !args_str.contains("/home/dev/.claude.json"),
             "no claude mount expected for pi"
         );
-        assert!(!args_str.contains("/tmp/.claude,"));
+        assert!(!args_str.contains("/home/dev/.claude,"));
     }
 
     #[test]
@@ -2643,15 +2874,15 @@ mod tests {
 
         let args_str = args.join(" ");
         assert!(
-            args_str.contains("/tmp/.omp/agent"),
+            args_str.contains("/home/dev/.omp/agent"),
             "omp agent config mount missing: {}",
             args_str
         );
         assert!(
-            !args_str.contains("/tmp/.claude.json"),
+            !args_str.contains("/home/dev/.claude.json"),
             "no claude mount expected for omp"
         );
-        assert!(!args_str.contains("/tmp/.claude,"));
+        assert!(!args_str.contains("/home/dev/.claude,"));
     }
 
     #[test]
@@ -2679,12 +2910,14 @@ mod tests {
         // Find indices of the parent and bin mount entries.
         let parent_idx = args
             .iter()
-            .position(|a| a.contains("target=/tmp/.pi/agent") && !a.contains("/tmp/.pi/agent/bin"))
-            .expect("parent /tmp/.pi/agent mount missing");
+            .position(|a| {
+                a.contains("target=/home/dev/.pi/agent") && !a.contains("/home/dev/.pi/agent/bin")
+            })
+            .expect("parent /home/dev/.pi/agent mount missing");
         let bin_idx = args
             .iter()
-            .position(|a| a.contains("target=/tmp/.pi/agent/bin"))
-            .expect("bin overlay /tmp/.pi/agent/bin mount missing");
+            .position(|a| a.contains("target=/home/dev/.pi/agent/bin"))
+            .expect("bin overlay /home/dev/.pi/agent/bin mount missing");
         assert!(bin_idx > parent_idx, "bin overlay must come after parent");
 
         let bin_arg = &args[bin_idx];

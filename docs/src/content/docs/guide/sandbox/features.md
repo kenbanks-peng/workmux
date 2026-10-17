@@ -100,14 +100,17 @@ No configuration is needed. If the host has no `user.name` or `user.email` confi
 
 Both sandbox backends mount agent-specific credential directories from the host. The mounted directory depends on the configured `agent`:
 
-| Agent      | Host directory             | Container mount               | Lima mount                     |
-| ---------- | -------------------------- | ----------------------------- | ------------------------------ |
-| `claude`   | `~/.claude/`               | `/tmp/.claude/`               | `$HOME/.claude/`               |
-| `gemini`   | `~/.gemini/`               | `/tmp/.gemini/`               | `$HOME/.gemini/`               |
-| `codex`    | `~/.codex/`                | `/home/user/.codex/`          | `$HOME/.codex/`                |
-| `opencode` | `~/.local/share/opencode/` | `/tmp/.local/share/opencode/` | `$HOME/.local/share/opencode/` |
-| `pi`       | `~/.pi/agent/`             | `/tmp/.pi/agent/`             | `$HOME/.pi/agent/`             |
-| `omp`      | `~/.omp/agent/`            | `/tmp/.omp/agent/`            | `$HOME/.omp/agent/`            |
+| Agent      | Host directory             | Container mount                | Lima mount                     |
+| ---------- | -------------------------- | ------------------------------ | ------------------------------ |
+| `claude`   | `~/.claude/`               | `$HOME/.claude/`               | `$HOME/.claude/`               |
+| `gemini`   | `~/.gemini/`               | `$HOME/.gemini/`               | `$HOME/.gemini/`               |
+| `codex`    | `~/.codex/`                | `$HOME/.codex/`                | `$HOME/.codex/`                |
+| `opencode` | `~/.local/share/opencode/` | `$HOME/.local/share/opencode/` | `$HOME/.local/share/opencode/` |
+| `pi`       | `~/.pi/agent/`             | `$HOME/.pi/agent/`             | `$HOME/.pi/agent/`             |
+| `omp`      | `~/.omp/agent/`            | `$HOME/.omp/agent/`            | `$HOME/.omp/agent/`            |
+
+For containers, `$HOME` is selected by `sandbox.container.home` in the global config
+(default: `/home/dev`). All container paths in the table follow that setting.
 
 OpenCode's global config directory (`~/.config/opencode/`) is also mounted read-only, providing access to `opencode.json`, plugins, and global MCP definitions.
 
@@ -120,7 +123,7 @@ Key behaviors:
 - For `pi`, the entire `~/.pi/agent/` is shared except `bin/`. Pi auto-downloads platform-specific `fd` and `rg` binaries into `bin/`, so a Linux sandbox would otherwise overwrite a macOS host's Mach-O binaries through the bind mount. Workmux overlays a per-sandbox, arch-keyed directory on `bin/` to keep host and guest binaries separate.
 - OMP uses file-backed state and credentials mounted from `~/.omp/agent/`.
 
-The container backend also uses a separate config file for Claude, mounted to `/tmp/.claude.json` inside the container. Docker/Podman use `~/.claude-sandbox.json` (file mount); Apple Container uses `~/.claude-sandbox-config/claude.json` (directory mount, since Apple Container only supports directory mounts).
+The container backend also uses a separate config file for Claude, mounted to `$HOME/.claude.json` inside the container. Docker/Podman use `~/.claude-sandbox.json` (file mount); Apple Container uses `~/.claude-sandbox-config/claude.json` (directory mount, since Apple Container only supports directory mounts).
 
 ### Custom config directory
 
