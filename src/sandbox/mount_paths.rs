@@ -13,7 +13,7 @@ pub(super) fn resolve(
     mount: &ExtraMount,
     worktree_root: &Path,
     container_home: &str,
-) -> anyhow::Result<(PathBuf, PathBuf, bool)> {
+) -> anyhow::Result<Option<(PathBuf, PathBuf, bool)>> {
     let host_path = match mount {
         ExtraMount::Path(path) => path,
         ExtraMount::Spec { host_path, .. } => host_path,
@@ -51,6 +51,9 @@ pub(super) fn resolve(
         }
     }
     let resolved = resolved_mount.resolve()?;
+    if resolved_mount.skip_missing(&resolved.0)? {
+        return Ok(None);
+    }
     if suffix.is_some() {
         anyhow::ensure!(
             resolved.0.exists(),
@@ -58,5 +61,49 @@ pub(super) fn resolve(
             resolved.0.display()
         );
     }
-    Ok(resolved)
+    Ok(Some(resolved))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_extra_mount_validates_paths_before_skipping() {
+        let temp = tempfile::tempdir().unwrap();
+        for (host, guest) in [
+            ("relative".to_string(), "/guest"),
+            (
+                temp.path().join("missing").display().to_string(),
+                "relative",
+            ),
+        ] {
+            let mount = ExtraMount::Spec {
+                host_path: host,
+                guest_path: Some(guest.into()),
+                writable: None,
+                optional: true,
+            };
+            assert!(resolve(&mount, temp.path(), "/home/dev").is_err());
+        }
+    }
+
+    #[test]
+    fn optional_extra_mount_skips_missing_literal_path_without_git() {
+        let temp = tempfile::tempdir().unwrap();
+        let host = temp.path().join("missing");
+        let mount = ExtraMount::Spec {
+            host_path: host.display().to_string(),
+            guest_path: None,
+            writable: None,
+            optional: true,
+        };
+        assert!(resolve(&mount, temp.path(), "/home/dev").unwrap().is_none());
+        assert!(!host.exists());
+        std::fs::create_dir(&host).unwrap();
+        assert_eq!(
+            resolve(&mount, temp.path(), "/home/dev").unwrap(),
+            Some((host.clone(), host, true))
+        );
+    }
 }

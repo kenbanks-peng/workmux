@@ -94,12 +94,14 @@ sandbox:
     - host_path: "{project_root}/.aven"
       guest_path: "{container_home}/.aven"
       writable: true
+      optional: true
 ```
 
 This mounts the project's shared Aven directory at `/home/dev/.aven`.
 Workers can access its database with `aven --db "$HOME/.aven/tasks.db"`,
-so changing `container.home` updates both paths automatically. Initialize
-the host `.aven` directory before launching. The `{container_home}` prefix
+so changing `container.home` updates both paths automatically. With
+`optional: true`, projects without a host `.aven` directory launch without
+this mount; no directory or database is created. The `{container_home}` prefix
 is container-only; literal extra-mount destinations and the host-exec shim
 directory remain independent of HOME.
 

@@ -337,6 +337,9 @@ fn generate_mounts_with_state_root(
     // Extra mounts from config
     for extra in config.sandbox.extra_mounts() {
         let (host_path, guest_path, read_only) = extra.resolve()?;
+        if extra.skip_missing(&host_path)? {
+            continue;
+        }
         mounts.push(Mount {
             host_path,
             guest_path,
@@ -458,6 +461,37 @@ mod tests {
 
     fn agent_config_host_path(tmp_path: &Path, agent_name: &str) -> PathBuf {
         tmp_path.join("agent-cfg").join(agent_name)
+    }
+
+    #[test]
+    fn optional_extra_mount_only_mounts_existing_host_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = init_git_project(tmp.path());
+        let host = tmp.path().join("optional");
+        let mut config = Config::default();
+        config.sandbox.agent_config_dir = Some(custom_agent_config_dir(tmp.path()));
+        config.sandbox.extra_mounts = Some(vec![crate::config::ExtraMount::Spec {
+            host_path: host.display().to_string(),
+            guest_path: Some("/mnt/optional".into()),
+            writable: Some(true),
+            optional: true,
+        }]);
+        for present in [false, true] {
+            if present {
+                std::fs::create_dir(&host).unwrap();
+            }
+            let mounts = generate_mounts_with_state_root(
+                &project,
+                IsolationLevel::Project,
+                &config,
+                "optional-mount-test",
+                "omp",
+                Some(tmp.path()),
+            )
+            .unwrap();
+            assert_eq!(mounts.iter().any(|mount| mount.host_path == host), present);
+            assert_eq!(host.exists(), present);
+        }
     }
 
     #[test]

@@ -1655,6 +1655,7 @@ pub enum ToolchainMode {
 /// Supports two forms:
 /// - Simple string: `"~/my-notes"` (read-only, mirrored path)
 /// - Detailed spec: `{ host_path: "~/data", guest_path: "/mnt/data", writable: true }`
+/// - Optional mounts: add `optional: true` to skip missing host paths.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum ExtraMount {
@@ -1668,10 +1669,27 @@ pub enum ExtraMount {
         guest_path: Option<String>,
         #[serde(default)]
         writable: Option<bool>,
+        /// Skip this mount if the host path does not exist.
+        #[serde(default)]
+        optional: bool,
     },
 }
 
 impl ExtraMount {
+    /// Whether an optional mount should be omitted after host path expansion.
+    /// Filesystem errors other than a missing path are still reported.
+    pub fn skip_missing(&self, host_path: &Path) -> anyhow::Result<bool> {
+        if !matches!(self, Self::Spec { optional: true, .. }) {
+            return Ok(false);
+        }
+        Ok(!host_path.try_exists().with_context(|| {
+            format!(
+                "extra_mounts: failed to check host path: {}",
+                host_path.display()
+            )
+        })?)
+    }
+
     /// Resolve the mount to (host_path, guest_path, read_only).
     /// Expands `~` in host_path to the user's home directory.
     /// Returns an error if host_path or guest_path is not absolute after expansion.
@@ -1682,6 +1700,7 @@ impl ExtraMount {
                 host_path,
                 guest_path,
                 writable,
+                ..
             } => (
                 host_path.as_str(),
                 guest_path.as_deref(),
@@ -6194,6 +6213,23 @@ extra_mounts:
     }
 
     #[test]
+    fn test_extra_mount_optional_defaults_false_and_roundtrips() {
+        for flag in ["", "\noptional: false", "\noptional: true"] {
+            let mount: ExtraMount =
+                serde_yaml::from_str(&format!("host_path: /missing{flag}")).unwrap();
+            assert!(matches!(
+                mount,
+                ExtraMount::Spec { optional, .. } if optional == flag.ends_with("true")
+            ));
+            let serialized = serde_yaml::to_string(&mount).unwrap();
+            assert_eq!(
+                serde_yaml::from_str::<ExtraMount>(&serialized).unwrap(),
+                mount
+            );
+        }
+    }
+
+    #[test]
     fn test_extra_mount_rejects_relative_host_path() {
         let mount = ExtraMount::Path("relative/path".to_string());
         let result = mount.resolve();
@@ -6208,6 +6244,7 @@ extra_mounts:
             host_path: "/tmp/data".to_string(),
             guest_path: Some("relative/guest".to_string()),
             writable: None,
+            optional: false,
         };
         let result = mount.resolve();
         assert!(result.is_err());

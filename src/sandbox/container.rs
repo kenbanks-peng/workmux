@@ -1011,7 +1011,11 @@ fn build_docker_run_args_inner(
     let extra_mounts = config.extra_mounts();
     let git_identity = crate::git::RepositoryIdentity::discover(worktree_root).ok();
     for mount in extra_mounts {
-        let (host, guest, read_only) = super::mount_paths::resolve(mount, worktree_root, home)?;
+        let Some((host, guest, read_only)) =
+            super::mount_paths::resolve(mount, worktree_root, home)?
+        else {
+            continue;
+        };
         if !read_only {
             if let Some(git_identity) = &git_identity {
                 let protected = [
@@ -2266,6 +2270,7 @@ mod tests {
             host_path: "/tmp/data".to_string(),
             guest_path: Some("/mnt/data".to_string()),
             writable: Some(true),
+            optional: false,
         }]);
         let args = test_build_run_args(&config, false);
 
@@ -2286,6 +2291,7 @@ mod tests {
             host_path: identity.common_dir.to_string_lossy().into_owned(),
             guest_path: Some(identity.common_dir.to_string_lossy().into_owned()),
             writable: Some(true),
+            optional: false,
         }]);
         let error = build_docker_run_args_with_state_dir(
             "claude",
@@ -2318,11 +2324,13 @@ mod tests {
                     host_path: "/host/tasks".into(),
                     guest_path: Some("{container_home}/.aven".into()),
                     writable: Some(true),
+                    optional: false,
                 },
                 ExtraMount::Spec {
                     host_path: "/host/home".into(),
                     guest_path: Some("{container_home}".into()),
                     writable: Some(false),
+                    optional: false,
                 },
             ]);
             let args = test_build_run_args(&config, false);
@@ -2344,12 +2352,60 @@ mod tests {
             host_path: "{project_root}/.aven".into(),
             guest_path: Some("{container_home}/.aven".into()),
             writable: Some(true),
+            optional: false,
         }]);
         let args = test_build_args(&worktree, &config);
         assert!(args.contains(&format!(
             "type=bind,source={},target=/custom/home/.aven",
             main.join(".aven").canonicalize().unwrap().display()
         )));
+    }
+
+    #[test]
+    fn optional_project_extra_mount_skips_missing_without_creating_it() {
+        use crate::config::ExtraMount;
+
+        let (_temp, main, worktree) = linked_worktree();
+        let aven = main.join(".aven");
+        for present in [false, true] {
+            if present {
+                std::fs::create_dir(&aven).unwrap();
+            }
+            for runtime in [
+                SandboxRuntime::Docker,
+                SandboxRuntime::Podman,
+                SandboxRuntime::AppleContainer,
+            ] {
+                for optional in [false, true] {
+                    let mut config = sandbox_config(runtime, |_| {});
+                    config.container.home = Some("/home/dev".into());
+                    config.extra_mounts = Some(vec![ExtraMount::Spec {
+                        host_path: "{project_root}/.aven".into(),
+                        guest_path: Some("{container_home}/.aven".into()),
+                        writable: Some(true),
+                        optional,
+                    }]);
+                    let result = test_build_run_args_result_for_worktree(&worktree, &config, false);
+                    if !present && !optional {
+                        assert!(
+                            result
+                                .unwrap_err()
+                                .to_string()
+                                .contains("expanded host path does not exist")
+                        );
+                    } else {
+                        let args = result.unwrap();
+                        assert_eq!(
+                            args.iter()
+                                .any(|arg| arg.contains("target=/home/dev/.aven")),
+                            present,
+                            "{runtime:?}, optional={optional}: {args:?}"
+                        );
+                    }
+                    assert_eq!(aven.exists(), present, "must not create the Aven directory");
+                }
+            }
+        }
     }
 
     #[test]

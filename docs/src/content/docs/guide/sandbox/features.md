@@ -11,7 +11,7 @@ The `extra_mounts` option lets you mount additional host directories into the sa
 
 `extra_mounts` is a **global-only** setting. If set in a project's `.workmux.yaml`, it is ignored and a warning is logged. This prevents a malicious repository from mounting arbitrary host paths into the sandbox.
 
-Each entry can be a simple path string (read-only, mirrored into the guest at the same path) or a detailed spec with `host_path`, optional `guest_path`, and optional `writable` flag.
+Each entry can be a simple path string (read-only, mirrored into the guest at the same path) or a detailed spec with `host_path`, optional `guest_path`, and optional `writable` and `optional` flags.
 
 ```yaml
 # ~/.config/workmux/config.yaml
@@ -25,6 +25,11 @@ sandbox:
       guest_path: /mnt/shared
       writable: true
 ```
+
+Set `optional: true` on a detailed mount to skip it when the expanded host path
+does not exist. Workmux does not create the missing path. Path validation and
+other filesystem errors still fail; existing mounts retain their configured
+permissions. Mounts are required by default.
 
 Paths starting with `~` are expanded to the user's home directory. When `guest_path` is omitted, the expanded host path is used as the guest mount point.
 
